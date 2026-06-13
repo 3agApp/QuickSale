@@ -37,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -82,7 +83,7 @@ fun SettingsScreen(
 
     // Clear focus after a scan so the soft keyboard doesn't pop up on the URL field.
     val focusManager = LocalFocusManager.current
-    var scanCount by rememberSaveable { mutableStateOf(0) }
+    var scanCount by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(scanCount) {
         if (scanCount > 0) focusManager.clearFocus(force = true)
     }

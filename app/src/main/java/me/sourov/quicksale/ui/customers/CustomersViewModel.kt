@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import me.sourov.quicksale.data.local.Customer
@@ -22,7 +21,6 @@ import me.sourov.quicksale.data.local.CustomerRepository
 class CustomersViewModel(private val repository: CustomerRepository) : ViewModel() {
 
     private val _query = MutableStateFlow("")
-    val query: StateFlow<String> = _query.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val customers: Flow<PagingData<Customer>> = _query

@@ -17,8 +17,6 @@ data class Product(
     val categories: String,
     val description: String,
 ) {
-    val inStock: Boolean get() = stockStatus == "instock"
-
     val onSale: Boolean get() = salePrice.isNotBlank() && salePrice != regularPrice
 
     val categoryList: List<String>
