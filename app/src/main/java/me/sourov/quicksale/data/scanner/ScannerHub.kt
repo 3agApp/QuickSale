@@ -29,6 +29,11 @@ object ScannerHub {
     private val _scans = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val scans: SharedFlow<String> = _scans.asSharedFlow()
 
+    /** Pushes a scan from a non-broadcast source (e.g. keyboard/HID capture) into the stream. */
+    fun emit(raw: String) {
+        if (raw.isNotBlank()) _scans.tryEmit(raw)
+    }
+
     private val _lastDiagnostic = MutableStateFlow<ScanDiagnostic?>(null)
     val lastDiagnostic: StateFlow<ScanDiagnostic?> = _lastDiagnostic.asStateFlow()
 
@@ -50,7 +55,7 @@ object ScannerHub {
                 val extrasMap = buildMap {
                     extras?.keySet()?.forEach { k ->
                         @Suppress("DEPRECATION")
-                        put(k, extras.get(k)?.toString().orEmpty())
+                        put(k, decodeExtra(extras.get(k)))
                     }
                 }
                 _lastDiagnostic.value = ScanDiagnostic(
@@ -63,9 +68,9 @@ object ScannerHub {
                     !extraKey.isNullOrBlank() ->
                         intent.getStringExtra(extraKey) ?: extrasMap[extraKey]
                     else ->
-                        // No specific key configured: hand over all extras so the
-                        // parser can find ck_/cs_ wherever they are.
-                        extrasMap.values.filter { it.isNotBlank() }.joinToString(" ")
+                        // No specific key configured: pick just the barcode field, not the
+                        // scanner's metadata extras (symbology, length, timestamp, …).
+                        pickBarcode(extrasMap)
                 }
                 if (!raw.isNullOrBlank()) _scans.tryEmit(raw)
             }
@@ -86,5 +91,36 @@ object ScannerHub {
         receiver?.let { runCatching { context.applicationContext.unregisterReceiver(it) } }
         receiver = null
         registeredKey = null
+    }
+
+    /** Converts a broadcast extra to text, decoding raw byte/char arrays (some scanners send these). */
+    private fun decodeExtra(value: Any?): String = when (value) {
+        null -> ""
+        is String -> value
+        is ByteArray -> String(value, Charsets.UTF_8).filter { !Character.isISOControl(it) }.trim()
+        is CharArray -> String(value).filter { !Character.isISOControl(it) }.trim()
+        else -> value.toString()
+    }
+
+    /** Common extra keys scanner apps use for the decoded barcode value, most-specific first. */
+    private val KNOWN_DATA_KEYS = listOf(
+        "data", "barcode_string", "barcode", "scan_barcode1", "value",
+        "scannerdata", "scanner_data", "com.symbol.datawedge.data_string",
+        "barocode", "decode_data", "scan_result", "result",
+        "extra_barcode_decoded_data",
+    )
+
+    /**
+     * Extracts just the decoded barcode from a broadcast's extras when no specific key is
+     * configured: prefer a well-known data key, otherwise fall back to the longest string
+     * value (the decoded payload is almost always longer than metadata like symbology/length).
+     */
+    private fun pickBarcode(extras: Map<String, String>): String? {
+        if (extras.isEmpty()) return null
+        for (key in KNOWN_DATA_KEYS) {
+            val value = extras.entries.firstOrNull { it.key.equals(key, ignoreCase = true) }?.value
+            if (!value.isNullOrBlank()) return value
+        }
+        return extras.values.filter { it.isNotBlank() }.maxByOrNull { it.length }
     }
 }

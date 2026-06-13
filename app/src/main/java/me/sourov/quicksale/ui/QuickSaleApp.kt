@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import me.sourov.quicksale.data.scanner.ScannerHub
 import me.sourov.quicksale.navigation.QuickSaleNavHost
 import me.sourov.quicksale.navigation.TopLevelDestination
 import me.sourov.quicksale.navigation.navigateToTopLevel
@@ -46,6 +47,17 @@ fun QuickSaleApp() {
     // Collapse the manual search toggle whenever the destination changes (queries persist).
     LaunchedEffect(currentRoute) { searchActive = false }
 
+    // On the Products tab, a hardware/camera scan (broadcast or keyboard, per Settings) becomes
+    // the search query; scanning again replaces it.
+    LaunchedEffect(isProducts) {
+        if (isProducts) {
+            ScannerHub.scans.collect { scan ->
+                // Show the scanned query without forcing the keyboard open (autoFocus stays off).
+                productsQuery = scan.trim()
+            }
+        }
+    }
+
     val activeQuery = when {
         isProducts -> productsQuery
         isCustomers -> customersQuery
@@ -66,6 +78,7 @@ fun QuickSaleApp() {
                 onBack = { navController.popBackStack() },
                 searchEnabled = searchEnabled,
                 searchActive = showSearchField,
+                autoFocus = searchActive,
                 query = activeQuery,
                 placeholder = if (isCustomers) "Search customers" else "Search products",
                 onQueryChange = onQueryChange,

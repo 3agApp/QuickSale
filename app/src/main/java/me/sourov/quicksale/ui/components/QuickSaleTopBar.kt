@@ -29,6 +29,7 @@ fun QuickSaleTopBar(
     onBack: () -> Unit,
     searchEnabled: Boolean,
     searchActive: Boolean,
+    autoFocus: Boolean,
     query: String,
     placeholder: String,
     onQueryChange: (String) -> Unit,
@@ -41,7 +42,9 @@ fun QuickSaleTopBar(
 
     if (searchEnabled && searchActive) {
         val focusRequester = remember { FocusRequester() }
-        LaunchedEffect(Unit) { focusRequester.requestFocus() }
+        // Only steal focus / show the keyboard when the user opened search — not when a
+        // scan populated the field.
+        LaunchedEffect(autoFocus) { if (autoFocus) focusRequester.requestFocus() }
         TopAppBar(
             colors = colors,
             navigationIcon = {
