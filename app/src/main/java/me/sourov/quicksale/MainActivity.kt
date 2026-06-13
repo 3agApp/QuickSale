@@ -4,44 +4,49 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
+import me.sourov.quicksale.data.scanner.ScannerConfigRepository
+import me.sourov.quicksale.data.scanner.ScannerHub
+import me.sourov.quicksale.data.settings.settingsDataStore
+import me.sourov.quicksale.ui.QuickSaleApp
 import me.sourov.quicksale.ui.theme.QuickSaleTheme
 
 class MainActivity : ComponentActivity() {
+
+    private val scannerConfigRepository by lazy {
+        ScannerConfigRepository(applicationContext.settingsDataStore)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent {
-            QuickSaleTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
+
+        // While the app is visible, keep a scanner broadcast receiver registered to match
+        // the saved config (re-registers automatically when the config changes).
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                scannerConfigRepository.config.collect { config ->
+                    ScannerHub.register(
+                        context = this@MainActivity,
+                        actions = config.registrableActions,
+                        extraKey = config.extraKey.ifBlank { null },
                     )
                 }
             }
         }
+
+        setContent {
+            QuickSaleTheme {
+                QuickSaleApp()
+            }
+        }
     }
-}
 
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    QuickSaleTheme {
-        Greeting("Android")
+    override fun onStop() {
+        super.onStop()
+        ScannerHub.unregister(this)
     }
 }
