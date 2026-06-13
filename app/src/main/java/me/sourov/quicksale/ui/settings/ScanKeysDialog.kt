@@ -1,11 +1,10 @@
 package me.sourov.quicksale.ui.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -13,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -41,15 +41,18 @@ import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.delay
 import me.sourov.quicksale.data.scanner.ScannerHub
+import me.sourov.quicksale.scan.QrCaptureActivity
 import me.sourov.quicksale.ui.theme.BrandGradient
 
 /**
- * Captures a hardware-scanner ("keyboard wedge" / HID mode) scan of the WooCommerce
- * key QR code. The scanner types the decoded text as key events, which we accumulate
- * and hand back. Finalises on Enter, or after a short pause for scanners that send no
- * terminator. No soft keyboard is shown.
+ * Captures a WooCommerce key QR scan from three sources, applying the first one automatically:
+ *  - a hardware scanner in keyboard/HID mode (captured key events, finalised on Enter or a pause),
+ *  - a hardware scanner in broadcast mode (via [ScannerHub]),
+ *  - the device camera (ZXing), for phones without a hardware scanner.
  */
 @Composable
 fun ScanKeysDialog(
@@ -67,15 +70,27 @@ fun ScanKeysDialog(
         }
     }
 
+    val cameraLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        result.contents?.let { submit(it) }
+    }
+
+    fun launchCamera() {
+        val options = ScanOptions()
+            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt("Point the camera at the API key QR code")
+            .setBeepEnabled(false)
+            .setOrientationLocked(true)
+            .setCaptureActivity(QrCaptureActivity::class.java)
+        cameraLauncher.launch(options)
+    }
+
     // Keyboard/HID mode: focus the capture surface so scanned keystrokes land here.
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     // Broadcast/intent mode: take the scan from the broadcast receiver.
-    LaunchedEffect(Unit) {
-        ScannerHub.scans.collect { raw -> submit(raw) }
-    }
+    LaunchedEffect(Unit) { ScannerHub.scans.collect { raw -> submit(raw) } }
 
-    // Fallback for scanners that don't append Enter: finalise once input goes quiet.
+    // Fallback for HID scanners that don't append Enter: finalise once input goes quiet.
     LaunchedEffect(buffer) {
         if (buffer.isNotBlank()) {
             delay(500)
@@ -132,37 +147,34 @@ fun ScanKeysDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Point the scanner at the QR code WooCommerce shows after creating " +
-                        "REST API keys, then pull the trigger.",
+                    text = if (buffer.isEmpty()) {
+                        "Pull the trigger on your scanner, or scan with the camera."
+                    } else {
+                        "Reading… ${buffer.length} characters"
+                    },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (buffer.isEmpty()) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
                     textAlign = TextAlign.Center,
                 )
 
-                if (buffer.isNotEmpty()) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = "Reading… ${buffer.length} characters",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-
                 Spacer(Modifier.height(20.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Button(
+                    onClick = { launchCamera() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
                 ) {
-                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                        Text("Cancel")
-                    }
-                    Button(
-                        onClick = { submit(buffer) },
-                        enabled = buffer.isNotBlank(),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Use")
-                    }
+                    Icon(Icons.Outlined.PhotoCamera, contentDescription = null)
+                    Spacer(Modifier.size(10.dp))
+                    Text("Scan with camera")
+                }
+                Spacer(Modifier.height(4.dp))
+                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                    Text("Cancel")
                 }
             }
         }
