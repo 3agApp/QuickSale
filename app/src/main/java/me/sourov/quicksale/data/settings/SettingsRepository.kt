@@ -41,7 +41,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
 
     suspend fun update(settings: StoreSettings) {
         dataStore.edit { prefs ->
-            prefs[Keys.SITE_URL] = settings.siteUrl.trim()
+            prefs[Keys.SITE_URL] = normalizeHttpsSiteUrl(settings.siteUrl).orEmpty()
             prefs[Keys.CONSUMER_KEY] = settings.consumerKey.trim()
             prefs[Keys.CONSUMER_SECRET] = settings.consumerSecret.trim()
         }

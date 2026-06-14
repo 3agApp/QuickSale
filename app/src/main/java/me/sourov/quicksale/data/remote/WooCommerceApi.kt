@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.sourov.quicksale.data.local.Customer
 import me.sourov.quicksale.data.local.Product
+import me.sourov.quicksale.data.settings.normalizeHttpsSiteUrl
 import me.sourov.quicksale.data.settings.StoreSettings
 import org.json.JSONArray
 import org.json.JSONObject
@@ -36,7 +37,7 @@ class WooCommerceApi(private val settings: StoreSettings) {
         status: String,
         setPaid: Boolean,
     ): Long = withContext(Dispatchers.IO) {
-        val base = normalizeBaseUrl(settings.siteUrl)
+        val base = normalizeHttpsSiteUrl(settings.siteUrl)
             ?: throw IllegalStateException("Invalid store URL")
         val ck = URLEncoder.encode(settings.consumerKey.trim(), "UTF-8")
         val cs = URLEncoder.encode(settings.consumerSecret.trim(), "UTF-8")
@@ -85,7 +86,7 @@ class WooCommerceApi(private val settings: StoreSettings) {
         extraQuery: String = "",
         map: (JSONObject) -> T,
     ): Page<T> = withContext(Dispatchers.IO) {
-        val base = normalizeBaseUrl(settings.siteUrl)
+        val base = normalizeHttpsSiteUrl(settings.siteUrl)
             ?: throw IllegalStateException("Invalid store URL")
         val ck = URLEncoder.encode(settings.consumerKey.trim(), "UTF-8")
         val cs = URLEncoder.encode(settings.consumerSecret.trim(), "UTF-8")
@@ -168,9 +169,4 @@ class WooCommerceApi(private val settings: StoreSettings) {
             .replace(Regex("\\s+"), " ")
             .trim()
 
-    private fun normalizeBaseUrl(raw: String): String? {
-        val trimmed = raw.trim().trimEnd('/')
-        if (trimmed.isBlank()) return null
-        return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) trimmed else "https://$trimmed"
-    }
 }

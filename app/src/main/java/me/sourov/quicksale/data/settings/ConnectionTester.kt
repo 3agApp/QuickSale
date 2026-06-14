@@ -18,7 +18,7 @@ sealed interface ConnectionResult {
 class ConnectionTester {
 
     suspend fun test(settings: StoreSettings): ConnectionResult = withContext(Dispatchers.IO) {
-        val base = normalizeBaseUrl(settings.siteUrl)
+        val base = normalizeHttpsSiteUrl(settings.siteUrl)
             ?: return@withContext ConnectionResult.Failure("Enter a valid store URL")
         if (settings.consumerKey.isBlank() || settings.consumerSecret.isBlank()) {
             return@withContext ConnectionResult.Failure("Enter both the consumer key and secret")
@@ -51,13 +51,4 @@ class ConnectionTester {
         }
     }
 
-    private fun normalizeBaseUrl(raw: String): String? {
-        val trimmed = raw.trim().trimEnd('/')
-        if (trimmed.isBlank()) return null
-        return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            trimmed
-        } else {
-            "https://$trimmed"
-        }
-    }
 }

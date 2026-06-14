@@ -6,9 +6,13 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import me.sourov.quicksale.data.settings.ConnectionResult
 import me.sourov.quicksale.data.settings.ConnectionTester
+import me.sourov.quicksale.data.settings.HTTPS_SITE_URL_PREFIX
 import me.sourov.quicksale.data.settings.SettingsRepository
 import me.sourov.quicksale.data.settings.StoreSettings
 import me.sourov.quicksale.data.settings.WooKeyParser
+import me.sourov.quicksale.data.settings.hasHttpsSiteUrlHost
+import me.sourov.quicksale.data.settings.normalizeHttpsSiteUrl
+import me.sourov.quicksale.data.settings.toHttpsSiteUrlInput
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +29,7 @@ sealed interface ConnectionTestState {
 }
 
 data class SettingsUiState(
-    val siteUrl: String = "",
+    val siteUrl: String = HTTPS_SITE_URL_PREFIX,
     val consumerKey: String = "",
     val consumerSecret: String = "",
     val isLoading: Boolean = true,
@@ -40,16 +44,16 @@ data class SettingsUiState(
         get() = consumerKey.isNotBlank() && consumerSecret.isNotBlank()
 
     val isDirty: Boolean
-        get() = siteUrl != saved.siteUrl ||
+        get() = siteUrl != saved.siteUrl.toHttpsSiteUrlInput() ||
             consumerKey != saved.consumerKey ||
             consumerSecret != saved.consumerSecret
 
     val canSave: Boolean
-        get() = !isSaving && isDirty && siteUrl.isNotBlank() && hasCredentials
+        get() = !isSaving && isDirty && hasHttpsSiteUrlHost(siteUrl) && hasCredentials
 
     val canTest: Boolean
         get() = connectionTest != ConnectionTestState.Testing &&
-            siteUrl.isNotBlank() && hasCredentials
+            hasHttpsSiteUrlHost(siteUrl) && hasCredentials
 }
 
 class SettingsViewModel(
@@ -69,7 +73,7 @@ class SettingsViewModel(
                 _uiState.update { state ->
                     if (state.isLoading) {
                         state.copy(
-                            siteUrl = stored.siteUrl,
+                            siteUrl = stored.siteUrl.toHttpsSiteUrlInput(),
                             consumerKey = stored.consumerKey,
                             consumerSecret = stored.consumerSecret,
                             saved = stored,
@@ -86,7 +90,7 @@ class SettingsViewModel(
     }
 
     fun onSiteUrlChange(value: String) = _uiState.update {
-        it.copy(siteUrl = value, connectionTest = ConnectionTestState.Idle)
+        it.copy(siteUrl = value.toHttpsSiteUrlInput(), connectionTest = ConnectionTestState.Idle)
     }
 
     fun onConsumerKeyChange(value: String) = _uiState.update {
@@ -123,9 +127,13 @@ class SettingsViewModel(
         if (!state.canTest) return
         viewModelScope.launch {
             _uiState.update { it.copy(connectionTest = ConnectionTestState.Testing) }
+            val normalizedSiteUrl = normalizeHttpsSiteUrl(state.siteUrl)
+                ?: return@launch _uiState.update {
+                    it.copy(connectionTest = ConnectionTestState.Failure("Enter a valid store URL"))
+                }
             val result = connectionTester.test(
                 StoreSettings(
-                    siteUrl = state.siteUrl,
+                    siteUrl = normalizedSiteUrl,
                     consumerKey = state.consumerKey,
                     consumerSecret = state.consumerSecret,
                 )
@@ -145,10 +153,12 @@ class SettingsViewModel(
         val state = _uiState.value
         if (!state.canSave) return
         viewModelScope.launch {
+            val normalizedSiteUrl = normalizeHttpsSiteUrl(state.siteUrl)
+                ?: return@launch _messages.send("Enter a valid store URL")
             _uiState.update { it.copy(isSaving = true) }
             repository.update(
                 StoreSettings(
-                    siteUrl = state.siteUrl,
+                    siteUrl = normalizedSiteUrl,
                     consumerKey = state.consumerKey,
                     consumerSecret = state.consumerSecret,
                 )

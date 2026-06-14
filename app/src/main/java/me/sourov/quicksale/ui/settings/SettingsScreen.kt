@@ -58,7 +58,11 @@ import me.sourov.quicksale.data.scanner.ScannerConfigRepository
 import me.sourov.quicksale.data.settings.LabelSettingsRepository
 import me.sourov.quicksale.data.settings.OrderSettingsRepository
 import me.sourov.quicksale.data.settings.SettingsRepository
+import me.sourov.quicksale.data.settings.hasHttpsSiteUrlHost
 import me.sourov.quicksale.data.settings.settingsDataStore
+import me.sourov.quicksale.data.update.AppUpdatePreferences
+import me.sourov.quicksale.ui.update.AppUpdateSettingsSection
+import me.sourov.quicksale.ui.update.AppUpdateViewModel
 
 @Composable
 fun SettingsScreen(
@@ -88,8 +92,18 @@ fun SettingsScreen(
     val labelSettingsViewModel: LabelSettingsViewModel =
         viewModel(factory = LabelSettingsViewModel.factory(labelSettingsRepository))
 
+    val updatePreferences = remember {
+        AppUpdatePreferences(context.applicationContext.settingsDataStore)
+    }
+    val updateViewModel: AppUpdateViewModel =
+        viewModel(factory = AppUpdateViewModel.factory(updatePreferences))
+
     LaunchedEffect(Unit) {
         viewModel.messages.collect { message -> snackbarHostState.showSnackbar(message) }
+    }
+
+    LaunchedEffect(Unit) {
+        updateViewModel.messages.collect { message -> snackbarHostState.showSnackbar(message) }
     }
 
     var secretVisible by rememberSaveable { mutableStateOf(false) }
@@ -127,7 +141,7 @@ fun SettingsScreen(
         )
 
         Spacer(Modifier.height(20.dp))
-        val isCleartextUrl = state.siteUrl.trim().startsWith("http://", ignoreCase = true)
+        val isIncompleteUrl = !hasHttpsSiteUrlHost(state.siteUrl)
         OutlinedTextField(
             value = state.siteUrl,
             onValueChange = viewModel::onSiteUrlChange,
@@ -135,12 +149,12 @@ fun SettingsScreen(
             placeholder = { Text("https://yourstore.com") },
             leadingIcon = { Icon(Icons.Outlined.Language, contentDescription = null) },
             singleLine = true,
-            isError = isCleartextUrl,
-            supportingText = if (isCleartextUrl) {
+            isError = false,
+            supportingText = if (isIncompleteUrl) {
                 {
                     Text(
-                        text = "Use https:// — plain http:// is blocked in the published app.",
-                        color = MaterialTheme.colorScheme.error,
+                        text = "Enter your store domain after https://.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             } else null,
@@ -275,6 +289,11 @@ fun SettingsScreen(
         HorizontalDivider()
         Spacer(Modifier.height(20.dp))
         ScannerSettingsSection(viewModel = scannerViewModel)
+
+        Spacer(Modifier.height(28.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(20.dp))
+        AppUpdateSettingsSection(viewModel = updateViewModel)
     }
 
     if (showScanDialog) {

@@ -19,20 +19,34 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import me.sourov.quicksale.data.scanner.ScannerHub
+import me.sourov.quicksale.data.settings.settingsDataStore
+import me.sourov.quicksale.data.update.AppUpdatePreferences
 import me.sourov.quicksale.navigation.QuickSaleNavHost
 import me.sourov.quicksale.navigation.Routes
 import me.sourov.quicksale.navigation.TopLevelDestination
 import me.sourov.quicksale.navigation.navigateToTopLevel
 import me.sourov.quicksale.ui.components.QuickSaleTopBar
+import me.sourov.quicksale.ui.update.AppUpdatePrompt
+import me.sourov.quicksale.ui.update.AppUpdateViewModel
 
 @Composable
 fun QuickSaleApp() {
+    val context = LocalContext.current
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
+    val updatePreferences = remember {
+        AppUpdatePreferences(context.applicationContext.settingsDataStore)
+    }
+    val updateViewModel: AppUpdateViewModel =
+        viewModel(factory = AppUpdateViewModel.factory(updatePreferences))
+    val updateState by updateViewModel.uiState.collectAsStateWithLifecycle()
 
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
@@ -52,6 +66,10 @@ fun QuickSaleApp() {
 
     // Collapse the manual search toggle whenever the destination changes (queries persist).
     LaunchedEffect(currentRoute) { searchActive = false }
+
+    LaunchedEffect(Unit) {
+        updateViewModel.checkOnAppStart()
+    }
 
     // On the Products tab, a hardware/camera scan (broadcast or keyboard, per Settings) becomes
     // the search query; scanning again replaces it.
@@ -132,6 +150,16 @@ fun QuickSaleApp() {
             productsQuery = productsQuery,
             customersQuery = customersQuery,
             modifier = Modifier.padding(innerPadding),
+        )
+    }
+
+    updateState.promptRelease?.let { release ->
+        AppUpdatePrompt(
+            release = release,
+            currentVersionName = updateState.currentVersionName,
+            onLater = updateViewModel::dismissPrompt,
+            onSkipVersion = updateViewModel::skipPromptVersion,
+            onUpdateOpened = updateViewModel::dismissPrompt,
         )
     }
 }

@@ -11,5 +11,5 @@ data class StoreSettings(
 ) {
     /** True once every field needed to talk to the WooCommerce REST API is present. */
     val isConfigured: Boolean
-        get() = siteUrl.isNotBlank() && consumerKey.isNotBlank() && consumerSecret.isNotBlank()
+        get() = hasHttpsSiteUrlHost(siteUrl) && consumerKey.isNotBlank() && consumerSecret.isNotBlank()
 }
