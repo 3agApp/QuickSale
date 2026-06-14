@@ -1,5 +1,6 @@
 package me.sourov.quicksale.device.printer
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
@@ -12,12 +13,13 @@ import java.lang.reflect.Method
  *
  * Print flow mirrors the vendor demo: open() once, then per copy reset/addImage/start.
  */
+@SuppressLint("PrivateApi")
 class BldPrintManager private constructor(
     private val instance: Any,
     private val cls: Class<*>,
 ) {
-    private val intType = Int::class.javaPrimitiveType!!
-    private val boolType = Boolean::class.javaPrimitiveType!!
+    private val intType = Int::class.javaPrimitiveType ?: Int::class.java
+    private val boolType = Boolean::class.javaPrimitiveType ?: Boolean::class.java
 
     private fun method(name: String, vararg types: Class<*>): Method = cls.getMethod(name, *types)
 

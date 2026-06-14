@@ -32,7 +32,6 @@
         <activity
             android:name=".scan.QrCaptureActivity"
             android:exported="false"
-            android:screenOrientation="portrait"
             android:stateNotNeeded="true" />
     </application>
 

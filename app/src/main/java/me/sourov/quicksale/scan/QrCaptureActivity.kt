@@ -8,8 +8,8 @@ import com.journeyapps.barcodescanner.DecoratedBarcodeView
 import com.journeyapps.barcodescanner.Size
 
 /**
- * ZXing capture activity tuned for square QR codes: locked to portrait (see manifest)
- * with a centred square scan window rather than the default wide 1D-barcode strip.
+ * ZXing capture activity tuned for square QR codes, with a centred square scan window
+ * rather than the default wide 1D-barcode strip.
  */
 class QrCaptureActivity : Activity() {
 

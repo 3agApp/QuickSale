@@ -9,6 +9,8 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.withTranslation
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.MultiFormatWriter
@@ -62,15 +64,14 @@ class LabelRenderer {
         height += PADDING
         height = height.coerceAtLeast(120)
 
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bitmap = createBitmap(width, height)
         val canvas = Canvas(bitmap).apply { drawColor(Color.WHITE) }
 
         var y = PADDING.toFloat()
         nameLayout?.let { layout ->
-            canvas.save()
-            canvas.translate(PADDING.toFloat(), y)
-            layout.draw(canvas)
-            canvas.restore()
+            canvas.withTranslation(PADDING.toFloat(), y) {
+                layout.draw(this)
+            }
             y += layout.height + GAP
         }
         codeBitmap?.let { code ->

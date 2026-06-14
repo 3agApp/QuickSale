@@ -61,41 +61,40 @@ class MainActivity : ComponentActivity() {
      * Capture them here (soft-keyboard text goes through the IME, not here) and publish the
      * decoded string so any screen can react. Finalises on Enter, or after a short pause.
      */
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (!keyboardScannerMode) return super.dispatchKeyEvent(event)
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (!keyboardScannerMode) return super.onKeyDown(keyCode, event)
 
-        when (event.keyCode) {
+        when (keyCode) {
             KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                if (event.action == KeyEvent.ACTION_DOWN) {
-                    mainHandler.removeCallbacks(flushScan)
-                    flushScanBuffer()
-                }
+                mainHandler.removeCallbacks(flushScan)
+                flushScanBuffer()
                 return true
             }
 
             else -> {
-                val ch = event.unicodeChar
+                val ch = event?.unicodeChar ?: 0
                 if (ch != 0 && !Character.isISOControl(ch)) {
-                    if (event.action == KeyEvent.ACTION_DOWN) {
-                        scanBuffer.append(ch.toChar())
-                        mainHandler.removeCallbacks(flushScan)
-                        mainHandler.postDelayed(flushScan, 250)
-                    }
+                    scanBuffer.append(ch.toChar())
+                    mainHandler.removeCallbacks(flushScan)
+                    mainHandler.postDelayed(flushScan, 250)
                     return true
                 }
             }
         }
-        return super.dispatchKeyEvent(event)
+        return super.onKeyDown(keyCode, event)
     }
 
     private fun flushScanBuffer() {
         val value = scanBuffer.toString()
         scanBuffer.setLength(0)
-        ScannerHub.emit(value)
+        if (value.isNotEmpty()) {
+            ScannerHub.emit(value)
+        }
     }
 
     override fun onStop() {
         super.onStop()
+        mainHandler.removeCallbacks(flushScan)
         ScannerHub.unregister(this)
     }
 }
