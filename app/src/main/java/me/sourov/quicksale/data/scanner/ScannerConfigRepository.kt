@@ -24,7 +24,7 @@ class ScannerConfigRepository(private val dataStore: DataStore<Preferences>) {
         .catch { error -> if (error is IOException) emit(emptyPreferences()) else throw error }
         .map { prefs ->
             val mode = runCatching { ScannerMode.valueOf(prefs[Keys.MODE] ?: "") }
-                .getOrDefault(ScannerMode.KEYBOARD)
+                .getOrDefault(ScannerMode.BROADCAST)
             ScannerConfig(
                 mode = mode,
                 presetId = prefs[Keys.PRESET] ?: ScannerPreset.AUTO_DETECT.id,

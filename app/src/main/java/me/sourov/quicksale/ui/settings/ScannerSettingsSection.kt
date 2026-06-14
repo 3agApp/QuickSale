@@ -80,6 +80,13 @@ fun ScannerSettingsSection(
                 var expanded by remember { mutableStateOf(false) }
                 val selectedPreset = ScannerPreset.fromId(config.presetId)
 
+                InfoCard(
+                    "Set your device's scanner app to Broadcast / Intent output mode (not " +
+                        "Keyboard/HID). Leave the preset on Auto-detect — if nothing scans, scan " +
+                        "once below and match the action shown in \"Last scan received\".",
+                )
+                Spacer(Modifier.height(12.dp))
+
                 ExposedDropdownMenuBox(
                     expanded = expanded,
                     onExpandedChange = { expanded = it },

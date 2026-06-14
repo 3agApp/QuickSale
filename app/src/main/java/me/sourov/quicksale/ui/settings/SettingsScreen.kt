@@ -127,6 +127,7 @@ fun SettingsScreen(
         )
 
         Spacer(Modifier.height(20.dp))
+        val isCleartextUrl = state.siteUrl.trim().startsWith("http://", ignoreCase = true)
         OutlinedTextField(
             value = state.siteUrl,
             onValueChange = viewModel::onSiteUrlChange,
@@ -134,6 +135,15 @@ fun SettingsScreen(
             placeholder = { Text("https://yourstore.com") },
             leadingIcon = { Icon(Icons.Outlined.Language, contentDescription = null) },
             singleLine = true,
+            isError = isCleartextUrl,
+            supportingText = if (isCleartextUrl) {
+                {
+                    Text(
+                        text = "Use https:// — plain http:// is blocked in the published app.",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            } else null,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Uri,
                 imeAction = ImeAction.Next,

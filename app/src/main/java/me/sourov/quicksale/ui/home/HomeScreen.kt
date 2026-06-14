@@ -193,7 +193,13 @@ private fun SyncCard(
             ) {
                 Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
-                Text(if (isRunning) "Syncing…" else "Sync now")
+                Text(
+                    when {
+                        isRunning -> "Syncing…"
+                        syncState is SyncState.Error -> "Retry sync"
+                        else -> "Sync now"
+                    }
+                )
             }
         }
     }

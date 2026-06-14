@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Production network policy: block cleartext (plain HTTP) so the WooCommerce
+   consumer key/secret are never sent unencrypted. ConnectionTester already
+   normalizes bare store URLs to https://, so this only blocks an explicit http://.
+   The debug build overrides this file (app/src/debug/res/xml) to permit cleartext
+   for local http test stores.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

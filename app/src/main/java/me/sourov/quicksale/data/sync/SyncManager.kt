@@ -4,11 +4,13 @@ import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.io.IOException
 import me.sourov.quicksale.data.local.Customer
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.QuickSaleDatabase
@@ -48,7 +50,7 @@ object SyncManager {
                 var page = 1
                 var totalPages = 1
                 do {
-                    val result = api.fetchProducts(page)
+                    val result = retryOnNetworkBlip { api.fetchProducts(page) }
                     totalPages = result.totalPages.coerceAtLeast(1)
                     products += result.items
                     _state.value = SyncState.Running(
@@ -63,7 +65,7 @@ object SyncManager {
                 page = 1
                 totalPages = 1
                 do {
-                    val result = api.fetchCustomers(page)
+                    val result = retryOnNetworkBlip { api.fetchCustomers(page) }
                     totalPages = result.totalPages.coerceAtLeast(1)
                     customers += result.items
                     _state.value = SyncState.Running(
@@ -81,5 +83,27 @@ object SyncManager {
                 _state.value = SyncState.Error(e.message ?: "Sync failed")
             }
         }
+    }
+
+    /**
+     * Retries a single page fetch on a transient network error ([IOException]) with a short
+     * exponential backoff. HTTP/auth failures surface as [IllegalStateException] and are NOT
+     * retried — a wrong key or 404 should fail fast rather than spin.
+     */
+    private suspend fun <T> retryOnNetworkBlip(
+        attempts: Int = 3,
+        initialDelayMs: Long = 700L,
+        block: suspend () -> T,
+    ): T {
+        var delayMs = initialDelayMs
+        repeat(attempts - 1) {
+            try {
+                return block()
+            } catch (_: IOException) {
+                delay(delayMs)
+                delayMs *= 2
+            }
+        }
+        return block() // last attempt: let the exception propagate
     }
 }

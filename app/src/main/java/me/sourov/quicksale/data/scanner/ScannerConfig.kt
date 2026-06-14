@@ -43,7 +43,7 @@ enum class ScannerPreset(
 }
 
 data class ScannerConfig(
-    val mode: ScannerMode = ScannerMode.KEYBOARD,
+    val mode: ScannerMode = ScannerMode.BROADCAST,
     val presetId: String = ScannerPreset.AUTO_DETECT.id,
     val action: String = "",
     val extraKey: String = "",
