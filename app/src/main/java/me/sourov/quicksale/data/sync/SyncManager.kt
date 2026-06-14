@@ -4,6 +4,9 @@ import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +28,7 @@ import me.sourov.quicksale.data.settings.settingsDataStore
 object SyncManager {
 
     private const val MAX_PAGES = 200
+    private const val MAX_PARALLEL_PAGE_FETCHES = 4
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -46,34 +50,20 @@ object SyncManager {
                 val db = QuickSaleDatabase.getInstance(appContext)
                 val api = WooCommerceApi(settings)
 
-                val products = mutableListOf<Product>()
-                var page = 1
-                var totalPages = 1
-                do {
-                    val result = retryOnNetworkBlip { api.fetchProducts(page) }
-                    totalPages = result.totalPages.coerceAtLeast(1)
-                    products += result.items
-                    _state.value = SyncState.Running(
-                        message = "Syncing products… ${products.size}",
-                        fraction = 0.5f * (page.toFloat() / totalPages),
-                    )
-                    page++
-                } while (page <= totalPages && page <= MAX_PAGES)
+                val products = fetchAllPages(
+                    label = "products",
+                    startFraction = 0f,
+                    endFraction = 0.5f,
+                    fetchPage = { page -> api.fetchProducts(page) },
+                )
                 db.productDao().replaceAll(products)
 
-                val customers = mutableListOf<Customer>()
-                page = 1
-                totalPages = 1
-                do {
-                    val result = retryOnNetworkBlip { api.fetchCustomers(page) }
-                    totalPages = result.totalPages.coerceAtLeast(1)
-                    customers += result.items
-                    _state.value = SyncState.Running(
-                        message = "Syncing customers… ${customers.size}",
-                        fraction = 0.5f + 0.5f * (page.toFloat() / totalPages),
-                    )
-                    page++
-                } while (page <= totalPages && page <= MAX_PAGES)
+                val customers = fetchAllPages(
+                    label = "customers",
+                    startFraction = 0.5f,
+                    endFraction = 1f,
+                    fetchPage = { page -> api.fetchCustomers(page) },
+                )
                 db.customerDao().replaceAll(customers)
 
                 val now = System.currentTimeMillis()
@@ -83,6 +73,55 @@ object SyncManager {
                 _state.value = SyncState.Error(e.message ?: "Sync failed")
             }
         }
+    }
+
+    private suspend fun <T> fetchAllPages(
+        label: String,
+        startFraction: Float,
+        endFraction: Float,
+        fetchPage: suspend (page: Int) -> WooCommerceApi.Page<T>,
+    ): List<T> = coroutineScope {
+        val firstPage = retryOnNetworkBlip { fetchPage(1) }
+        val totalPages = firstPage.totalPages.coerceAtLeast(1).coerceAtMost(MAX_PAGES)
+        val pages = mutableListOf(1 to firstPage.items)
+        var completedPages = 1
+        var itemCount = firstPage.items.size
+
+        publishPageProgress(label, itemCount, completedPages, totalPages, startFraction, endFraction)
+
+        (2..totalPages).chunked(MAX_PARALLEL_PAGE_FETCHES).forEach { chunk ->
+            val results = chunk
+                .map { page ->
+                    async {
+                        page to retryOnNetworkBlip { fetchPage(page) }.items
+                    }
+                }
+                .awaitAll()
+
+            pages += results
+            completedPages += results.size
+            itemCount += results.sumOf { it.second.size }
+            publishPageProgress(label, itemCount, completedPages, totalPages, startFraction, endFraction)
+        }
+
+        pages
+            .sortedBy { it.first }
+            .flatMap { it.second }
+    }
+
+    private fun publishPageProgress(
+        label: String,
+        itemCount: Int,
+        completedPages: Int,
+        totalPages: Int,
+        startFraction: Float,
+        endFraction: Float,
+    ) {
+        val pageFraction = completedPages.toFloat() / totalPages.coerceAtLeast(1)
+        _state.value = SyncState.Running(
+            message = "Syncing $label… $itemCount",
+            fraction = startFraction + (endFraction - startFraction) * pageFraction,
+        )
     }
 
     /**
