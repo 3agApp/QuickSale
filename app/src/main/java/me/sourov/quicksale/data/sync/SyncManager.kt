@@ -18,7 +18,9 @@ import me.sourov.quicksale.data.local.Customer
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.QuickSaleDatabase
 import me.sourov.quicksale.data.remote.WooCommerceApi
+import me.sourov.quicksale.data.settings.CurrencyRepository
 import me.sourov.quicksale.data.settings.SettingsRepository
+import me.sourov.quicksale.data.settings.StoreCurrency
 import me.sourov.quicksale.data.settings.settingsDataStore
 
 /**
@@ -49,6 +51,14 @@ object SyncManager {
 
                 val db = QuickSaleDatabase.getInstance(appContext)
                 val api = WooCommerceApi(settings)
+
+                // Refresh the store currency so prices show the right symbol. Non-fatal: an older
+                // store or missing endpoint must not abort the catalog/customer sync.
+                runCatching {
+                    val currency = retryOnNetworkBlip { api.fetchCurrency() }
+                    CurrencyRepository(appContext.settingsDataStore)
+                        .setCurrency(StoreCurrency(code = currency.code, symbol = currency.symbol))
+                }
 
                 val products = fetchAllPages(
                     label = "products",
