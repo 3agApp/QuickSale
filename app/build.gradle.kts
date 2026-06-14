@@ -14,7 +14,7 @@ val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) keystorePropertiesFile.inputStream().use { load(it) }
 }
 val hasReleaseKeystore = keystorePropertiesFile.exists()
-val githubRepository = providers.gradleProperty("githubRepository").orElse("SourovCodes/QuickSale")
+val githubRepository = providers.gradleProperty("githubRepository").orElse("3agApp/QuickSale")
 val githubReleasesApiUrl = githubRepository.map { "https://api.github.com/repos/$it/releases" }
 
 fun String.asBuildConfigString(): String =
