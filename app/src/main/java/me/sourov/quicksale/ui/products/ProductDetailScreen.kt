@@ -1,5 +1,6 @@
 package me.sourov.quicksale.ui.products
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,14 +19,23 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.material.icons.outlined.ZoomOutMap
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +56,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import me.sourov.quicksale.data.local.ProductRepository
 import me.sourov.quicksale.data.local.QuickSaleDatabase
+import me.sourov.quicksale.data.settings.LabelSettingsRepository
+import me.sourov.quicksale.data.settings.settingsDataStore
+import me.sourov.quicksale.device.label.LabelRenderer
+import me.sourov.quicksale.device.printer.BldPrintManager
+import me.sourov.quicksale.device.printer.LcPrintDriver
+import me.sourov.quicksale.device.printer.NoPrinterDriver
 
 @Composable
 fun ProductDetailScreen(
@@ -55,8 +72,18 @@ fun ProductDetailScreen(
     val repository = remember {
         ProductRepository(QuickSaleDatabase.getInstance(context).productDao())
     }
-    val viewModel: ProductDetailViewModel =
-        viewModel(factory = ProductDetailViewModel.factory(repository, productId))
+    val labelRenderer = remember { LabelRenderer() }
+    val printer = remember {
+        if (BldPrintManager.isSupported()) LcPrintDriver(context) else NoPrinterDriver()
+    }
+    val labelSettingsRepository = remember {
+        LabelSettingsRepository(context.applicationContext.settingsDataStore)
+    }
+    val viewModel: ProductDetailViewModel = viewModel(
+        factory = ProductDetailViewModel.factory(
+            repository, productId, labelRenderer, printer, labelSettingsRepository,
+        ),
+    )
     val product by viewModel.product.collectAsStateWithLifecycle()
 
     val current = product
@@ -72,6 +99,7 @@ fun ProductDetailScreen(
     }
 
     var showFullImage by remember { mutableStateOf(false) }
+    var showPrintSheet by remember { mutableStateOf(false) }
     val hasImage = !current.imageUrl.isNullOrBlank()
 
     Column(
@@ -151,7 +179,8 @@ fun ProductDetailScreen(
 
         Spacer(Modifier.height(28.dp))
         Button(
-            onClick = {},
+            onClick = { showPrintSheet = true },
+            enabled = viewModel.hasPrinter,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
@@ -160,12 +189,14 @@ fun ProductDetailScreen(
             Spacer(Modifier.width(10.dp))
             Text("Print label")
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "Label printing comes next.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (!viewModel.hasPrinter) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "This device has no printer.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 
     if (showFullImage && current.imageUrl != null) {
@@ -173,6 +204,131 @@ fun ProductDetailScreen(
             imageUrl = current.imageUrl,
             onDismiss = { showFullImage = false },
         )
+    }
+
+    if (showPrintSheet) {
+        LabelPrintSheet(
+            viewModel = viewModel,
+            onDismiss = {
+                viewModel.consumeMessage()
+                showPrintSheet = false
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LabelPrintSheet(
+    viewModel: ProductDetailViewModel,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val settings by viewModel.labelSettings.collectAsStateWithLifecycle()
+    val preview by viewModel.preview.collectAsStateWithLifecycle()
+    val printing by viewModel.printing.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = "Print label",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+
+            preview?.let { bmp ->
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(8.dp),
+                    shadowElevation = 2.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = "Label preview",
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                    )
+                }
+            }
+
+            StepperRow(
+                label = "Copies",
+                value = settings.copies,
+                onDecrease = { viewModel.setCopies(settings.copies - 1) },
+                onIncrease = { viewModel.setCopies(settings.copies + 1) },
+            )
+            StepperRow(
+                label = "Spacing",
+                value = settings.spacing,
+                onDecrease = { viewModel.setSpacing(settings.spacing - 1) },
+                onIncrease = { viewModel.setSpacing(settings.spacing + 1) },
+            )
+
+            Button(
+                onClick = viewModel::print,
+                enabled = viewModel.hasPrinter && !printing,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+            ) {
+                if (printing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Icon(Icons.Filled.Print, contentDescription = null)
+                    Spacer(Modifier.width(10.dp))
+                    Text("Print")
+                }
+            }
+
+            Text(
+                text = message ?: "Choose which fields print in Settings → Label printing.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StepperRow(
+    label: String,
+    value: Int,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            FilledTonalIconButton(onClick = onDecrease) {
+                Icon(Icons.Filled.Remove, contentDescription = "Decrease $label")
+            }
+            Text(
+                value.toString(),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            FilledTonalIconButton(onClick = onIncrease) {
+                Icon(Icons.Filled.Add, contentDescription = "Increase $label")
+            }
+        }
     }
 }
 

@@ -1,11 +1,13 @@
 package me.sourov.quicksale.ui
 
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -22,6 +24,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import me.sourov.quicksale.data.scanner.ScannerHub
 import me.sourov.quicksale.navigation.QuickSaleNavHost
+import me.sourov.quicksale.navigation.Routes
 import me.sourov.quicksale.navigation.TopLevelDestination
 import me.sourov.quicksale.navigation.navigateToTopLevel
 import me.sourov.quicksale.ui.components.QuickSaleTopBar
@@ -39,6 +42,9 @@ fun QuickSaleApp() {
     val isProducts = currentRoute == TopLevelDestination.PRODUCTS.route
     val isCustomers = currentRoute == TopLevelDestination.CUSTOMERS.route
     val searchEnabled = isProducts || isCustomers
+
+    // Order builder / confirmation take over the whole screen and manage their own chrome.
+    val fullScreen = Routes.isFullScreen(currentRoute)
 
     var productsQuery by rememberSaveable { mutableStateOf("") }
     var customersQuery by rememberSaveable { mutableStateOf("") }
@@ -72,44 +78,49 @@ fun QuickSaleApp() {
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        contentWindowInsets = if (fullScreen) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
         topBar = {
-            QuickSaleTopBar(
-                showBack = !isTopLevel,
-                onBack = { navController.popBackStack() },
-                searchEnabled = searchEnabled,
-                searchActive = showSearchField,
-                autoFocus = searchActive,
-                query = activeQuery,
-                placeholder = if (isCustomers) "Search customers" else "Search products",
-                onQueryChange = onQueryChange,
-                onSearchOpen = { searchActive = true },
-                onSearchClose = {
-                    searchActive = false
-                    onQueryChange("")
-                },
-            )
+            if (!fullScreen) {
+                QuickSaleTopBar(
+                    showBack = !isTopLevel,
+                    onBack = { navController.popBackStack() },
+                    searchEnabled = searchEnabled,
+                    searchActive = showSearchField,
+                    autoFocus = searchActive,
+                    query = activeQuery,
+                    placeholder = if (isCustomers) "Search customers" else "Search products",
+                    onQueryChange = onQueryChange,
+                    onSearchOpen = { searchActive = true },
+                    onSearchClose = {
+                        searchActive = false
+                        onQueryChange("")
+                    },
+                )
+            }
         },
         bottomBar = {
-            NavigationBar {
-                TopLevelDestination.entries.forEach { destination ->
-                    val selected = currentDestination?.hierarchy?.any {
-                        it.route == destination.route
-                    } == true
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = { navController.navigateToTopLevel(destination) },
-                        icon = {
-                            Icon(
-                                imageVector = if (selected) {
-                                    destination.selectedIcon
-                                } else {
-                                    destination.unselectedIcon
-                                },
-                                contentDescription = destination.label,
-                            )
-                        },
-                        label = { Text(destination.label) },
-                    )
+            if (!fullScreen) {
+                NavigationBar {
+                    TopLevelDestination.entries.forEach { destination ->
+                        val selected = currentDestination?.hierarchy?.any {
+                            it.route == destination.route
+                        } == true
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick = { navController.navigateToTopLevel(destination) },
+                            icon = {
+                                Icon(
+                                    imageVector = if (selected) {
+                                        destination.selectedIcon
+                                    } else {
+                                        destination.unselectedIcon
+                                    },
+                                    contentDescription = destination.label,
+                                )
+                            },
+                            label = { Text(destination.label) },
+                        )
+                    }
                 }
             }
         },

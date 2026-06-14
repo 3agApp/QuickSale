@@ -31,6 +31,19 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE id = :id")
     fun observeById(id: Long): Flow<Product?>
 
+    @Query(
+        """
+        SELECT * FROM products
+        WHERE name LIKE '%' || :query || '%' OR sku LIKE '%' || :query || '%'
+        ORDER BY name COLLATE NOCASE
+        LIMIT 50
+        """
+    )
+    fun search(query: String): Flow<List<Product>>
+
+    @Query("SELECT * FROM products WHERE sku = :sku LIMIT 1")
+    suspend fun findBySku(sku: String): Product?
+
     @Query("SELECT COUNT(*) FROM products")
     fun count(): Flow<Int>
 

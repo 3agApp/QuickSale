@@ -10,6 +10,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import me.sourov.quicksale.ui.customers.CustomersScreen
 import me.sourov.quicksale.ui.home.HomeScreen
+import me.sourov.quicksale.ui.orders.NewOrderScreen
+import me.sourov.quicksale.ui.orders.OrderConfirmationScreen
 import me.sourov.quicksale.ui.products.ProductDetailScreen
 import me.sourov.quicksale.ui.products.ProductsScreen
 import me.sourov.quicksale.ui.settings.SettingsScreen
@@ -18,6 +20,20 @@ object Routes {
     const val PRODUCT_DETAIL = "product_detail"
     const val PRODUCT_ID_ARG = "productId"
     fun productDetail(id: Long) = "$PRODUCT_DETAIL/$id"
+
+    const val NEW_ORDER = "new_order"
+    const val CUSTOMER_ID_ARG = "customerId"
+    const val NEW_ORDER_ROUTE = "$NEW_ORDER/{$CUSTOMER_ID_ARG}"
+    fun newOrder(id: Long) = "$NEW_ORDER/$id"
+
+    const val ORDER_CONFIRMATION = "order_confirmation"
+    const val ORDER_ID_ARG = "orderId"
+    const val ORDER_CONFIRMATION_ROUTE = "$ORDER_CONFIRMATION/{$ORDER_ID_ARG}"
+    fun orderConfirmation(orderId: Long) = "$ORDER_CONFIRMATION/$orderId"
+
+    /** Routes that take over the whole screen (no global top bar / bottom nav). */
+    fun isFullScreen(route: String?): Boolean =
+        route != null && (route.startsWith("$NEW_ORDER/") || route.startsWith("$ORDER_CONFIRMATION/"))
 }
 
 @Composable
@@ -43,7 +59,10 @@ fun QuickSaleNavHost(
             )
         }
         composable(TopLevelDestination.CUSTOMERS.route) {
-            CustomersScreen(query = customersQuery)
+            CustomersScreen(
+                query = customersQuery,
+                onCustomerClick = { id -> navController.navigate(Routes.newOrder(id)) },
+            )
         }
         composable(TopLevelDestination.SETTINGS.route) {
             SettingsScreen(snackbarHostState = snackbarHostState)
@@ -54,6 +73,34 @@ fun QuickSaleNavHost(
         ) { backStackEntry ->
             val id = backStackEntry.arguments?.getLong(Routes.PRODUCT_ID_ARG) ?: 0L
             ProductDetailScreen(productId = id)
+        }
+        composable(
+            route = Routes.NEW_ORDER_ROUTE,
+            arguments = listOf(navArgument(Routes.CUSTOMER_ID_ARG) { type = NavType.LongType }),
+        ) { backStackEntry ->
+            val id = backStackEntry.arguments?.getLong(Routes.CUSTOMER_ID_ARG) ?: 0L
+            NewOrderScreen(
+                customerId = id,
+                onBack = { navController.popBackStack() },
+                onPlaced = { orderId ->
+                    navController.navigate(Routes.orderConfirmation(orderId)) {
+                        // Don't return to the order builder when leaving the confirmation.
+                        popUpTo(Routes.NEW_ORDER_ROUTE) { inclusive = true }
+                    }
+                },
+            )
+        }
+        composable(
+            route = Routes.ORDER_CONFIRMATION_ROUTE,
+            arguments = listOf(navArgument(Routes.ORDER_ID_ARG) { type = NavType.LongType }),
+        ) { backStackEntry ->
+            val orderId = backStackEntry.arguments?.getLong(Routes.ORDER_ID_ARG) ?: 0L
+            OrderConfirmationScreen(
+                orderId = orderId,
+                onDone = {
+                    navController.popBackStack(TopLevelDestination.CUSTOMERS.route, inclusive = false)
+                },
+            )
         }
     }
 }

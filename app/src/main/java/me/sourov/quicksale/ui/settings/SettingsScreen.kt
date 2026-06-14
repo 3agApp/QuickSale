@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import me.sourov.quicksale.data.scanner.ScannerConfigRepository
+import me.sourov.quicksale.data.settings.LabelSettingsRepository
+import me.sourov.quicksale.data.settings.OrderSettingsRepository
 import me.sourov.quicksale.data.settings.SettingsRepository
 import me.sourov.quicksale.data.settings.settingsDataStore
 
@@ -73,6 +75,18 @@ fun SettingsScreen(
     }
     val scannerViewModel: ScannerViewModel =
         viewModel(factory = ScannerViewModel.factory(scannerRepository))
+
+    val orderSettingsRepository = remember {
+        OrderSettingsRepository(context.applicationContext.settingsDataStore)
+    }
+    val orderSettingsViewModel: OrderSettingsViewModel =
+        viewModel(factory = OrderSettingsViewModel.factory(orderSettingsRepository))
+
+    val labelSettingsRepository = remember {
+        LabelSettingsRepository(context.applicationContext.settingsDataStore)
+    }
+    val labelSettingsViewModel: LabelSettingsViewModel =
+        viewModel(factory = LabelSettingsViewModel.factory(labelSettingsRepository))
 
     LaunchedEffect(Unit) {
         viewModel.messages.collect { message -> snackbarHostState.showSnackbar(message) }
@@ -236,6 +250,16 @@ fun SettingsScreen(
                 Text(if (state.isDirty) "Save changes" else "Saved")
             }
         }
+
+        Spacer(Modifier.height(28.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(20.dp))
+        OrderSettingsSection(viewModel = orderSettingsViewModel)
+
+        Spacer(Modifier.height(28.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(20.dp))
+        LabelSettingsSection(viewModel = labelSettingsViewModel)
 
         Spacer(Modifier.height(28.dp))
         HorizontalDivider()

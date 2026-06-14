@@ -22,6 +22,62 @@ class WooCommerceApi(private val settings: StoreSettings) {
     suspend fun fetchCustomers(page: Int, perPage: Int = 100): Page<Customer> =
         fetchPage("customers", page, perPage, extraQuery = "&role=all") { it.toCustomer() }
 
+    /** A product line to send when creating an order. */
+    data class LineItem(val productId: Long, val quantity: Int)
+
+    /**
+     * Creates an order in WooCommerce and returns the new remote order id.
+     * @param status WooCommerce status slug (e.g. "processing").
+     * @param setPaid whether to mark the order paid (records a payment date).
+     */
+    suspend fun createOrder(
+        customerId: Long,
+        lineItems: List<LineItem>,
+        status: String,
+        setPaid: Boolean,
+    ): Long = withContext(Dispatchers.IO) {
+        val base = normalizeBaseUrl(settings.siteUrl)
+            ?: throw IllegalStateException("Invalid store URL")
+        val ck = URLEncoder.encode(settings.consumerKey.trim(), "UTF-8")
+        val cs = URLEncoder.encode(settings.consumerSecret.trim(), "UTF-8")
+        val endpoint = "$base/wp-json/wc/v3/orders?consumer_key=$ck&consumer_secret=$cs"
+
+        val payload = JSONObject().apply {
+            put("customer_id", customerId)
+            put("status", status)
+            put("set_paid", setPaid)
+            put("line_items", JSONArray().apply {
+                lineItems.forEach { item ->
+                    put(JSONObject().apply {
+                        put("product_id", item.productId)
+                        put("quantity", item.quantity)
+                    })
+                }
+            })
+        }
+
+        var connection: HttpURLConnection? = null
+        try {
+            connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 20_000
+                readTimeout = 20_000
+                doOutput = true
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Content-Type", "application/json")
+            }
+            connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                throw IllegalStateException("Store returned HTTP $code while creating the order")
+            }
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            JSONObject(body).optLong("id")
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
     private suspend fun <T> fetchPage(
         resource: String,
         page: Int,

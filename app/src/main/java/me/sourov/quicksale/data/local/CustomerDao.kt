@@ -38,6 +38,9 @@ interface CustomerDao {
     )
     fun countMatching(query: String): Flow<Int>
 
+    @Query("SELECT * FROM customers WHERE id = :id")
+    fun observeById(id: Long): Flow<Customer?>
+
     @Query("SELECT COUNT(*) FROM customers")
     fun count(): Flow<Int>
 

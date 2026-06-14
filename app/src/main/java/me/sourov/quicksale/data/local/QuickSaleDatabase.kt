@@ -4,12 +4,13 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import me.sourov.quicksale.BuildConfig
 
 @Database(
     entities = [Product::class, Customer::class],
-    version = 1,
+    version = 3,
     exportSchema = false,
 )
 abstract class QuickSaleDatabase : RoomDatabase() {
@@ -29,7 +30,34 @@ abstract class QuickSaleDatabase : RoomDatabase() {
         private fun build(context: Context): QuickSaleDatabase =
             Room.databaseBuilder(context, QuickSaleDatabase::class.java, "quicksale.db")
                 .addCallback(SeedCallback)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
+
+        /** v2 once stored orders locally; v3 drops them (orders go straight to WooCommerce now). */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS orders (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "remoteId INTEGER, customerId INTEGER NOT NULL, customerName TEXT NOT NULL, " +
+                        "status TEXT NOT NULL, total TEXT NOT NULL, createdAt INTEGER NOT NULL, " +
+                        "synced INTEGER NOT NULL, syncError TEXT)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS order_items (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, orderId INTEGER NOT NULL, " +
+                        "productId INTEGER NOT NULL, productName TEXT NOT NULL, price TEXT NOT NULL, " +
+                        "quantity INTEGER NOT NULL)"
+                )
+            }
+        }
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS order_items")
+                db.execSQL("DROP TABLE IF EXISTS orders")
+            }
+        }
 
         /** Populates a little sample data in debug builds so the screens are usable pre-sync. */
         private object SeedCallback : RoomDatabase.Callback() {

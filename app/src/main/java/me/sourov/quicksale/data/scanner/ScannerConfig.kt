@@ -37,6 +37,7 @@ enum class ScannerPreset(
             "barcode.broadcast.action",
             "com.scanner.broadcast",
             "com.xcheng.scanner.action.BARCODE_DECODING_BROADCAST",
+            "com.rfid.SCAN",
         )
     }
 }
