@@ -23,6 +23,45 @@ class WooCommerceApi(private val settings: StoreSettings) {
     suspend fun fetchCustomers(page: Int, perPage: Int = 100): Page<Customer> =
         fetchPage("customers", page, perPage, extraQuery = "&role=all") { it.toCustomer() }
 
+    /** The store's active display currency. */
+    data class Currency(val code: String, val symbol: String)
+
+    /**
+     * Reads the store's current currency from `/wc/v3/data/currencies/current`
+     * so prices render with the right symbol (e.g. £, €, ৳) instead of a hardcoded $.
+     */
+    suspend fun fetchCurrency(): Currency = withContext(Dispatchers.IO) {
+        val base = normalizeHttpsSiteUrl(settings.siteUrl)
+            ?: throw IllegalStateException("Invalid store URL")
+        val ck = URLEncoder.encode(settings.consumerKey.trim(), "UTF-8")
+        val cs = URLEncoder.encode(settings.consumerSecret.trim(), "UTF-8")
+        val endpoint =
+            "$base/wp-json/wc/v3/data/currencies/current?consumer_key=$ck&consumer_secret=$cs"
+
+        var connection: HttpURLConnection? = null
+        try {
+            connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 20_000
+                readTimeout = 20_000
+                setRequestProperty("Accept", "application/json")
+            }
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                throw IllegalStateException("Store returned HTTP $code while loading currency")
+            }
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            val json = JSONObject(body)
+            Currency(
+                code = json.optString("code"),
+                // WooCommerce sometimes returns the symbol as an HTML entity (e.g. "&#36;").
+                symbol = json.optString("symbol").decodeHtmlEntities(),
+            )
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
     /** A product line to send when creating an order. */
     data class LineItem(val productId: Long, val quantity: Int)
 
@@ -168,5 +207,26 @@ class WooCommerceApi(private val settings: StoreSettings) {
             .replace("&#8211;", "-")
             .replace(Regex("\\s+"), " ")
             .trim()
+
+    /** Decodes numeric (`&#36;`, `&#x24;`) and a few named HTML entities used by currency symbols. */
+    private fun String.decodeHtmlEntities(): String {
+        if ('&' !in this) return this
+        return Regex("&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);").replace(this) { match ->
+            val entity = match.groupValues[1]
+            val codePoint = when {
+                entity.startsWith("#x") -> entity.drop(2).toIntOrNull(16)
+                entity.startsWith("#") -> entity.drop(1).toIntOrNull()
+                else -> namedEntities[entity]
+            }
+            codePoint?.let { String(Character.toChars(it)) } ?: match.value
+        }
+    }
+
+    private companion object {
+        val namedEntities = mapOf(
+            "amp" to '&'.code, "lt" to '<'.code, "gt" to '>'.code, "nbsp" to ' '.code,
+            "pound" to '£'.code, "euro" to '€'.code, "yen" to '¥'.code, "cent" to '¢'.code,
+        )
+    }
 
 }

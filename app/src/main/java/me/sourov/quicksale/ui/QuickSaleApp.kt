@@ -26,6 +26,7 @@ import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import me.sourov.quicksale.data.scanner.ScannerHub
+import me.sourov.quicksale.data.settings.CurrencyRepository
 import me.sourov.quicksale.data.settings.settingsDataStore
 import me.sourov.quicksale.data.update.AppUpdatePreferences
 import me.sourov.quicksale.navigation.QuickSaleNavHost
@@ -69,6 +70,14 @@ fun QuickSaleApp() {
 
     LaunchedEffect(Unit) {
         updateViewModel.checkOnAppStart()
+    }
+
+    // Mirror the persisted store currency into the formatter so prices show the right symbol;
+    // emits again whenever a sync refreshes the currency, recomposing visible prices.
+    LaunchedEffect(Unit) {
+        CurrencyRepository(context.applicationContext.settingsDataStore).currency.collect {
+            CurrencyFormatter.update(it.symbol)
+        }
     }
 
     // On the Products tab, a hardware/camera scan (broadcast or keyboard, per Settings) becomes

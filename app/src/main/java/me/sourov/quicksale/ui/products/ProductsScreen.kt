@@ -48,6 +48,7 @@ import coil.compose.AsyncImage
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.ProductRepository
 import me.sourov.quicksale.data.local.QuickSaleDatabase
+import me.sourov.quicksale.ui.CurrencyFormatter
 
 @Composable
 fun ProductsScreen(
@@ -250,5 +251,5 @@ private fun EmptyState(message: String) {
 
 fun String.asPrice(): String {
     val trimmed = trim()
-    return if (trimmed.isBlank()) "—" else "$$trimmed"
+    return if (trimmed.isBlank()) "—" else "${CurrencyFormatter.symbol}$trimmed"
 }
