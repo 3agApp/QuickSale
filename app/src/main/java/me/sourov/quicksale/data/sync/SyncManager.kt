@@ -37,50 +37,63 @@ object SyncManager {
     private val _state = MutableStateFlow<SyncState>(SyncState.Idle)
     val state: StateFlow<SyncState> = _state.asStateFlow()
 
-    fun sync(context: Context) {
+    /** Sync the catalog only. */
+    fun syncProducts(context: Context) = sync(context, SyncTarget.Products)
+
+    /** Sync customers only. */
+    fun syncCustomers(context: Context) = sync(context, SyncTarget.Customers)
+
+    private fun sync(context: Context, target: SyncTarget) {
         if (_state.value is SyncState.Running) return
         val appContext = context.applicationContext
         scope.launch {
-            _state.value = SyncState.Running("Starting…", 0f)
+            _state.value = SyncState.Running(target, "Starting…", 0f)
             try {
                 val settings = SettingsRepository(appContext.settingsDataStore).settings.first()
                 if (!settings.isConfigured) {
-                    _state.value = SyncState.Error("Connect your store in Settings first")
+                    _state.value = SyncState.Error(target, "Connect your store in Settings first")
                     return@launch
                 }
 
                 val db = QuickSaleDatabase.getInstance(appContext)
                 val api = WooCommerceApi(settings)
 
-                // Refresh the store currency so prices show the right symbol. Non-fatal: an older
-                // store or missing endpoint must not abort the catalog/customer sync.
-                runCatching {
-                    val currency = retryOnNetworkBlip { api.fetchCurrency() }
-                    CurrencyRepository(appContext.settingsDataStore)
-                        .setCurrency(StoreCurrency(code = currency.code, symbol = currency.symbol))
+                val count = when (target) {
+                    SyncTarget.Products -> {
+                        // Refresh the store currency so prices show the right symbol. Non-fatal: an
+                        // older store or missing endpoint must not abort the catalog sync.
+                        runCatching {
+                            val currency = retryOnNetworkBlip { api.fetchCurrency() }
+                            CurrencyRepository(appContext.settingsDataStore)
+                                .setCurrency(StoreCurrency(code = currency.code, symbol = currency.symbol))
+                        }
+                        val products = fetchAllPages(
+                            label = target.label,
+                            startFraction = 0f,
+                            endFraction = 1f,
+                            fetchPage = { page -> api.fetchProducts(page) },
+                        )
+                        db.productDao().replaceAll(products)
+                        products.size
+                    }
+
+                    SyncTarget.Customers -> {
+                        val customers = fetchAllPages(
+                            label = target.label,
+                            startFraction = 0f,
+                            endFraction = 1f,
+                            fetchPage = { page -> api.fetchCustomers(page) },
+                        )
+                        db.customerDao().replaceAll(customers)
+                        customers.size
+                    }
                 }
-
-                val products = fetchAllPages(
-                    label = "products",
-                    startFraction = 0f,
-                    endFraction = 0.5f,
-                    fetchPage = { page -> api.fetchProducts(page) },
-                )
-                db.productDao().replaceAll(products)
-
-                val customers = fetchAllPages(
-                    label = "customers",
-                    startFraction = 0.5f,
-                    endFraction = 1f,
-                    fetchPage = { page -> api.fetchCustomers(page) },
-                )
-                db.customerDao().replaceAll(customers)
 
                 val now = System.currentTimeMillis()
                 SyncMetaRepository(appContext.settingsDataStore).setLastSync(now)
-                _state.value = SyncState.Success(products.size, customers.size, now)
+                _state.value = SyncState.Success(target, count, now)
             } catch (e: Exception) {
-                _state.value = SyncState.Error(e.message ?: "Sync failed")
+                _state.value = SyncState.Error(target, e.message ?: "Sync failed")
             }
         }
     }
@@ -127,8 +140,9 @@ object SyncManager {
         startFraction: Float,
         endFraction: Float,
     ) {
+        val running = _state.value as? SyncState.Running ?: return
         val pageFraction = completedPages.toFloat() / totalPages.coerceAtLeast(1)
-        _state.value = SyncState.Running(
+        _state.value = running.copy(
             message = "Syncing $label… $itemCount",
             fraction = startFraction + (endFraction - startFraction) * pageFraction,
         )
