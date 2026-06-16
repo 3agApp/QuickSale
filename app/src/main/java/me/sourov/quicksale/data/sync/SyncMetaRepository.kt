@@ -10,17 +10,17 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
-/** Tracks when data was last synced. */
+/** Tracks when each [SyncTarget] was last synced. */
 class SyncMetaRepository(private val dataStore: DataStore<Preferences>) {
 
-    private val lastSyncKey = longPreferencesKey("last_sync_millis")
+    private fun keyFor(target: SyncTarget) = longPreferencesKey("last_sync_${target.name}")
 
-    /** Epoch millis of the last successful sync, or 0 if never. */
-    val lastSyncMillis: Flow<Long> = dataStore.data
+    /** Epoch millis of the last successful sync for [target], or 0 if never. */
+    fun lastSyncMillis(target: SyncTarget): Flow<Long> = dataStore.data
         .catch { error -> if (error is IOException) emit(emptyPreferences()) else throw error }
-        .map { it[lastSyncKey] ?: 0L }
+        .map { it[keyFor(target)] ?: 0L }
 
-    suspend fun setLastSync(millis: Long) {
-        dataStore.edit { it[lastSyncKey] = millis }
+    suspend fun setLastSync(target: SyncTarget, millis: Long) {
+        dataStore.edit { it[keyFor(target)] = millis }
     }
 }

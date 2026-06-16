@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,13 +21,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Sync
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.sourov.quicksale.data.local.CustomerRepository
@@ -71,8 +72,12 @@ fun HomeScreen(
     val settings by settingsRepository.settings.collectAsStateWithLifecycle(initialValue = StoreSettings())
     val productCount by productRepository.count().collectAsStateWithLifecycle(initialValue = 0)
     val customerCount by customerRepository.count().collectAsStateWithLifecycle(initialValue = 0)
-    val lastSync by syncMetaRepository.lastSyncMillis.collectAsStateWithLifecycle(initialValue = 0L)
-    val syncState by SyncManager.state.collectAsStateWithLifecycle()
+    val productsSync by SyncManager.state(SyncTarget.Products).collectAsStateWithLifecycle()
+    val customersSync by SyncManager.state(SyncTarget.Customers).collectAsStateWithLifecycle()
+    val productsLastSync by syncMetaRepository.lastSyncMillis(SyncTarget.Products)
+        .collectAsStateWithLifecycle(initialValue = 0L)
+    val customersLastSync by syncMetaRepository.lastSyncMillis(SyncTarget.Customers)
+        .collectAsStateWithLifecycle(initialValue = 0L)
 
     Column(
         modifier = modifier
@@ -82,12 +87,20 @@ fun HomeScreen(
     ) {
         HomeHero(settings = settings, onClick = { onNavigate(TopLevelDestination.SETTINGS) })
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(28.dp))
+        Text(
+            text = "Sync",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(12.dp))
         SyncCard(
-            syncState = syncState,
+            productsSync = productsSync,
+            customersSync = customersSync,
             productCount = productCount,
             customerCount = customerCount,
-            lastSyncMillis = lastSync,
+            productsLastSync = productsLastSync,
+            customersLastSync = customersLastSync,
             onSyncProducts = { SyncManager.syncProducts(context) },
             onSyncCustomers = { SyncManager.syncCustomers(context) },
         )
@@ -120,10 +133,12 @@ fun HomeScreen(
 
 @Composable
 private fun SyncCard(
-    syncState: SyncState,
+    productsSync: SyncState,
+    customersSync: SyncState,
     productCount: Int,
     customerCount: Int,
-    lastSyncMillis: Long,
+    productsLastSync: Long,
+    customersLastSync: Long,
     onSyncProducts: () -> Unit,
     onSyncCustomers: () -> Unit,
 ) {
@@ -131,119 +146,100 @@ private fun SyncCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
     ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Outlined.Sync,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.size(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "Catalog & customers",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "$productCount products · $customerCount customers",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            when (val state = syncState) {
-                is SyncState.Running -> {
-                    LinearProgressIndicator(
-                        progress = { state.fraction.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = state.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                is SyncState.Error -> StatusLine(
-                    icon = Icons.Outlined.ErrorOutline,
-                    tint = MaterialTheme.colorScheme.error,
-                    text = state.message,
-                )
-
-                is SyncState.Success -> StatusLine(
-                    icon = Icons.Filled.CheckCircle,
-                    tint = MaterialTheme.colorScheme.tertiary,
-                    text = "Synced ${state.count} ${state.target.label}",
-                )
-
-                SyncState.Idle -> Text(
-                    text = lastSyncLabel(lastSyncMillis),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                SyncButton(
-                    target = SyncTarget.Products,
-                    syncState = syncState,
-                    icon = Icons.Filled.Inventory2,
-                    label = "Products",
-                    onClick = onSyncProducts,
-                )
-                SyncButton(
-                    target = SyncTarget.Customers,
-                    syncState = syncState,
-                    icon = Icons.Filled.People,
-                    label = "Customers",
-                    onClick = onSyncCustomers,
-                )
-            }
+        Column(Modifier.padding(vertical = 6.dp)) {
+            SyncRow(
+                icon = Icons.Filled.Inventory2,
+                title = "Products",
+                unit = "products",
+                count = productCount,
+                state = productsSync,
+                lastSyncMillis = productsLastSync,
+                onSync = onSyncProducts,
+            )
+            HorizontalDivider(Modifier.padding(horizontal = 20.dp))
+            SyncRow(
+                icon = Icons.Filled.People,
+                title = "Customers",
+                unit = "customers",
+                count = customerCount,
+                state = customersSync,
+                lastSyncMillis = customersLastSync,
+                onSync = onSyncCustomers,
+            )
         }
     }
 }
 
 @Composable
-private fun RowScope.SyncButton(
-    target: SyncTarget,
-    syncState: SyncState,
+private fun SyncRow(
     icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
+    title: String,
+    unit: String,
+    count: Int,
+    state: SyncState,
+    lastSyncMillis: Long,
+    onSync: () -> Unit,
 ) {
-    val isAnyRunning = syncState is SyncState.Running
-    val isThisRunning = syncState is SyncState.Running && syncState.target == target
-    val isThisError = syncState is SyncState.Error && syncState.target == target
-    Button(
-        onClick = onClick,
-        enabled = !isAnyRunning,
-        modifier = Modifier.weight(1f),
-    ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.size(8.dp))
-        Text(
-            when {
-                isThisRunning -> "Syncing…"
-                isThisError -> "Retry"
-                else -> label
+    val isRunning = state is SyncState.Running
+    Column(Modifier.padding(horizontal = 20.dp, vertical = 14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(22.dp),
+                )
             }
-        )
+            Spacer(Modifier.size(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                SyncStatusText(state = state, unit = unit, count = count, lastSyncMillis = lastSyncMillis)
+            }
+            Spacer(Modifier.size(12.dp))
+            FilledTonalIconButton(onClick = onSync, enabled = !isRunning) {
+                if (isRunning) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Outlined.Sync, contentDescription = "Sync $title", modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+
+        if (state is SyncState.Running) {
+            Spacer(Modifier.height(12.dp))
+            LinearProgressIndicator(
+                progress = { state.fraction.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
 @Composable
-private fun StatusLine(icon: ImageVector, tint: Color, text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.size(8.dp))
-        Text(text = text, style = MaterialTheme.typography.bodySmall, color = tint)
+private fun SyncStatusText(state: SyncState, unit: String, count: Int, lastSyncMillis: Long) {
+    val (text, color) = when (state) {
+        is SyncState.Running -> state.message to MaterialTheme.colorScheme.onSurfaceVariant
+        is SyncState.Error -> state.message to MaterialTheme.colorScheme.error
+        else -> "$count $unit · ${lastSyncLabel(lastSyncMillis)}" to MaterialTheme.colorScheme.onSurfaceVariant
     }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 private fun lastSyncLabel(millis: Long): String {

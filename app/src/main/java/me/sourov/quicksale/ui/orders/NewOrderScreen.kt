@@ -193,7 +193,13 @@ fun NewOrderScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = viewModel::onQueryChange,
-                placeholder = { Text("Scan, or search to add a product") },
+                placeholder = {
+                    Text(
+                        "Scan or search products",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {

@@ -24,8 +24,8 @@ import me.sourov.quicksale.data.settings.StoreCurrency
 import me.sourov.quicksale.data.settings.settingsDataStore
 
 /**
- * Runs catalog/customer synchronisation in an app-wide scope so it survives navigation,
- * and exposes [state] for any screen to observe (sync button + progress bar).
+ * Runs catalog/customer synchronisation in an app-wide scope so it survives navigation.
+ * Each [SyncTarget] syncs independently — observe [state] per target for its button/progress.
  */
 object SyncManager {
 
@@ -34,8 +34,10 @@ object SyncManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val _state = MutableStateFlow<SyncState>(SyncState.Idle)
-    val state: StateFlow<SyncState> = _state.asStateFlow()
+    private val states = SyncTarget.entries.associateWith { MutableStateFlow<SyncState>(SyncState.Idle) }
+
+    /** Observe the sync state for a single [target]. */
+    fun state(target: SyncTarget): StateFlow<SyncState> = states.getValue(target).asStateFlow()
 
     /** Sync the catalog only. */
     fun syncProducts(context: Context) = sync(context, SyncTarget.Products)
@@ -44,14 +46,15 @@ object SyncManager {
     fun syncCustomers(context: Context) = sync(context, SyncTarget.Customers)
 
     private fun sync(context: Context, target: SyncTarget) {
-        if (_state.value is SyncState.Running) return
+        val state = states.getValue(target)
+        if (state.value is SyncState.Running) return
         val appContext = context.applicationContext
         scope.launch {
-            _state.value = SyncState.Running(target, "Starting…", 0f)
+            state.value = SyncState.Running("Starting…", 0f)
             try {
                 val settings = SettingsRepository(appContext.settingsDataStore).settings.first()
                 if (!settings.isConfigured) {
-                    _state.value = SyncState.Error(target, "Connect your store in Settings first")
+                    state.value = SyncState.Error("Connect your store in Settings first")
                     return@launch
                 }
 
@@ -67,41 +70,30 @@ object SyncManager {
                             CurrencyRepository(appContext.settingsDataStore)
                                 .setCurrency(StoreCurrency(code = currency.code, symbol = currency.symbol))
                         }
-                        val products = fetchAllPages(
-                            label = target.label,
-                            startFraction = 0f,
-                            endFraction = 1f,
-                            fetchPage = { page -> api.fetchProducts(page) },
-                        )
+                        val products = fetchAllPages(state, target.label) { page -> api.fetchProducts(page) }
                         db.productDao().replaceAll(products)
                         products.size
                     }
 
                     SyncTarget.Customers -> {
-                        val customers = fetchAllPages(
-                            label = target.label,
-                            startFraction = 0f,
-                            endFraction = 1f,
-                            fetchPage = { page -> api.fetchCustomers(page) },
-                        )
+                        val customers = fetchAllPages(state, target.label) { page -> api.fetchCustomers(page) }
                         db.customerDao().replaceAll(customers)
                         customers.size
                     }
                 }
 
                 val now = System.currentTimeMillis()
-                SyncMetaRepository(appContext.settingsDataStore).setLastSync(now)
-                _state.value = SyncState.Success(target, count, now)
+                SyncMetaRepository(appContext.settingsDataStore).setLastSync(target, now)
+                state.value = SyncState.Success(count, now)
             } catch (e: Exception) {
-                _state.value = SyncState.Error(target, e.message ?: "Sync failed")
+                state.value = SyncState.Error(e.message ?: "Sync failed")
             }
         }
     }
 
     private suspend fun <T> fetchAllPages(
+        state: MutableStateFlow<SyncState>,
         label: String,
-        startFraction: Float,
-        endFraction: Float,
         fetchPage: suspend (page: Int) -> WooCommerceApi.Page<T>,
     ): List<T> = coroutineScope {
         val firstPage = retryOnNetworkBlip { fetchPage(1) }
@@ -110,7 +102,7 @@ object SyncManager {
         var completedPages = 1
         var itemCount = firstPage.items.size
 
-        publishPageProgress(label, itemCount, completedPages, totalPages, startFraction, endFraction)
+        publishPageProgress(state, label, itemCount, completedPages, totalPages)
 
         (2..totalPages).chunked(MAX_PARALLEL_PAGE_FETCHES).forEach { chunk ->
             val results = chunk
@@ -124,7 +116,7 @@ object SyncManager {
             pages += results
             completedPages += results.size
             itemCount += results.sumOf { it.second.size }
-            publishPageProgress(label, itemCount, completedPages, totalPages, startFraction, endFraction)
+            publishPageProgress(state, label, itemCount, completedPages, totalPages)
         }
 
         pages
@@ -133,18 +125,15 @@ object SyncManager {
     }
 
     private fun publishPageProgress(
+        state: MutableStateFlow<SyncState>,
         label: String,
         itemCount: Int,
         completedPages: Int,
         totalPages: Int,
-        startFraction: Float,
-        endFraction: Float,
     ) {
-        val running = _state.value as? SyncState.Running ?: return
-        val pageFraction = completedPages.toFloat() / totalPages.coerceAtLeast(1)
-        _state.value = running.copy(
+        state.value = SyncState.Running(
             message = "Syncing $label… $itemCount",
-            fraction = startFraction + (endFraction - startFraction) * pageFraction,
+            fraction = completedPages.toFloat() / totalPages.coerceAtLeast(1),
         )
     }
 
