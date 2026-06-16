@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -53,6 +54,7 @@ import me.sourov.quicksale.data.settings.settingsDataStore
 import me.sourov.quicksale.data.sync.SyncManager
 import me.sourov.quicksale.data.sync.SyncMetaRepository
 import me.sourov.quicksale.data.sync.SyncState
+import me.sourov.quicksale.data.sync.SyncTarget
 import me.sourov.quicksale.navigation.TopLevelDestination
 
 @Composable
@@ -86,7 +88,8 @@ fun HomeScreen(
             productCount = productCount,
             customerCount = customerCount,
             lastSyncMillis = lastSync,
-            onSync = { SyncManager.sync(context) },
+            onSyncProducts = { SyncManager.syncProducts(context) },
+            onSyncCustomers = { SyncManager.syncCustomers(context) },
         )
 
         Spacer(Modifier.height(28.dp))
@@ -121,9 +124,9 @@ private fun SyncCard(
     productCount: Int,
     customerCount: Int,
     lastSyncMillis: Long,
-    onSync: () -> Unit,
+    onSyncProducts: () -> Unit,
+    onSyncCustomers: () -> Unit,
 ) {
-    val isRunning = syncState is SyncState.Running
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -175,7 +178,7 @@ private fun SyncCard(
                 is SyncState.Success -> StatusLine(
                     icon = Icons.Filled.CheckCircle,
                     tint = MaterialTheme.colorScheme.tertiary,
-                    text = "Synced ${state.productCount} products and ${state.customerCount} customers",
+                    text = "Synced ${state.count} ${state.target.label}",
                 )
 
                 SyncState.Idle -> Text(
@@ -186,22 +189,51 @@ private fun SyncCard(
             }
 
             Spacer(Modifier.height(14.dp))
-            Button(
-                onClick = onSync,
-                enabled = !isRunning,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(8.dp))
-                Text(
-                    when {
-                        isRunning -> "Syncing…"
-                        syncState is SyncState.Error -> "Retry sync"
-                        else -> "Sync now"
-                    }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SyncButton(
+                    target = SyncTarget.Products,
+                    syncState = syncState,
+                    icon = Icons.Filled.Inventory2,
+                    label = "Products",
+                    onClick = onSyncProducts,
+                )
+                SyncButton(
+                    target = SyncTarget.Customers,
+                    syncState = syncState,
+                    icon = Icons.Filled.People,
+                    label = "Customers",
+                    onClick = onSyncCustomers,
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun RowScope.SyncButton(
+    target: SyncTarget,
+    syncState: SyncState,
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    val isAnyRunning = syncState is SyncState.Running
+    val isThisRunning = syncState is SyncState.Running && syncState.target == target
+    val isThisError = syncState is SyncState.Error && syncState.target == target
+    Button(
+        onClick = onClick,
+        enabled = !isAnyRunning,
+        modifier = Modifier.weight(1f),
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.size(8.dp))
+        Text(
+            when {
+                isThisRunning -> "Syncing…"
+                isThisError -> "Retry"
+                else -> label
+            }
+        )
     }
 }
 
