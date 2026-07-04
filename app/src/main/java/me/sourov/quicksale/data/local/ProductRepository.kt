@@ -19,5 +19,8 @@ class ProductRepository(private val dao: ProductDao) {
     /** Exact SKU match, used to add a scanned/entered barcode straight to the cart. */
     suspend fun findBySku(sku: String): Product? = dao.findBySku(sku.trim())
 
+    /** Updates the local copies of [products], e.g. fresh stock right after an order. */
+    suspend fun upsert(products: List<Product>) = dao.upsertAll(products)
+
     fun count(): Flow<Int> = dao.count()
 }

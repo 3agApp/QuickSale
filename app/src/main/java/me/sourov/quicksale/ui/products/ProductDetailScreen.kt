@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -63,6 +65,7 @@ import me.sourov.quicksale.device.printer.BldPrintManager
 import me.sourov.quicksale.device.printer.LcPrintDriver
 import me.sourov.quicksale.device.printer.NoPrinterDriver
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ProductDetailScreen(
     productId: Long,
@@ -155,9 +158,12 @@ fun ProductDetailScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                current.categoryList.take(4).forEach { category ->
-                    AssistChip(onClick = {}, label = { Text(category) })
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                current.categoryList.forEach { category ->
+                    AssistChip(onClick = {}, label = { Text(category, maxLines = 1) })
                 }
             }
         }

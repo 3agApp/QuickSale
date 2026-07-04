@@ -5,10 +5,14 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -21,9 +25,14 @@ import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.ProductRepository
 import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.data.scanner.ScannerHub
+import me.sourov.quicksale.data.settings.CheckoutConfig
+import me.sourov.quicksale.data.settings.CheckoutConfigRepository
 import me.sourov.quicksale.data.settings.OrderSettingsRepository
+import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.SettingsRepository
+import me.sourov.quicksale.data.settings.ShippingOption
 import java.math.BigDecimal
+import java.math.RoundingMode
 
 /** A product picked for the order, with its chosen quantity. */
 data class CartLine(val product: Product, val quantity: Int) {
@@ -32,9 +41,31 @@ data class CartLine(val product: Product, val quantity: Int) {
         get() = (product.price.toBigDecimalOrNull() ?: BigDecimal.ZERO) * quantity.toBigDecimal()
 }
 
-/** Outcome of placing an order: a successful WooCommerce order [remoteId], used to drive navigation. */
+/**
+ * The running totals shown while building the order. Tax is a local estimate from the store's
+ * standard rate — WooCommerce recalculates authoritatively when the order is created.
+ */
+data class TotalsPreview(
+    val subtotal: BigDecimal = BigDecimal.ZERO,
+    /** Shipping charge as entered (gross), or null when no shipping is selected. */
+    val shipping: BigDecimal? = null,
+    /** Estimated tax, or null when the store has no usable tax configuration. */
+    val tax: BigDecimal? = null,
+    /** True when [tax] is already contained in [total] (tax-inclusive store pricing). */
+    val taxIncluded: Boolean = false,
+    val taxLabel: String = "Tax",
+    val total: BigDecimal = BigDecimal.ZERO,
+)
+
+/** Outcome of placing an order: the store's order id plus the totals it calculated. */
 sealed interface PlaceResult {
-    data class Placed(val remoteId: Long) : PlaceResult
+    data class Placed(
+        val remoteId: Long,
+        val total: String,
+        val totalTax: String,
+        val shippingTotal: String,
+        val discountTotal: String,
+    ) : PlaceResult
 }
 
 class NewOrderViewModel(
@@ -43,10 +74,14 @@ class NewOrderViewModel(
     private val productRepository: ProductRepository,
     private val settingsRepository: SettingsRepository,
     private val orderSettingsRepository: OrderSettingsRepository,
+    checkoutConfigRepository: CheckoutConfigRepository,
 ) : ViewModel() {
 
     val customer: StateFlow<Customer?> = customerRepository.customer(customerId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val checkout: StateFlow<CheckoutConfig> = checkoutConfigRepository.config
+        .stateIn(viewModelScope, SharingStarted.Eagerly, CheckoutConfig())
 
     private val _lines = MutableStateFlow<List<CartLine>>(emptyList())
     val lines: StateFlow<List<CartLine>> = _lines.asStateFlow()
@@ -55,9 +90,26 @@ class NewOrderViewModel(
         .map { lines -> lines.sumOf { it.quantity } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
-    val total: StateFlow<BigDecimal> = _lines
-        .map { lines -> lines.fold(BigDecimal.ZERO) { acc, line -> acc + line.lineTotal } }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, BigDecimal.ZERO)
+    /** The operator's explicit gateway pick; null falls back to the store's first gateway. */
+    private val _gatewayChoice = MutableStateFlow<PaymentGateway?>(null)
+    val selectedGateway: StateFlow<PaymentGateway?> =
+        combine(_gatewayChoice, checkout) { choice, config ->
+            choice ?: config.gateways.firstOrNull()
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private val _shippingChoice = MutableStateFlow<ShippingOption?>(null)
+    val selectedShipping: StateFlow<ShippingOption?> = _shippingChoice.asStateFlow()
+
+    private val _shippingCost = MutableStateFlow("")
+    val shippingCost: StateFlow<String> = _shippingCost.asStateFlow()
+
+    private val _couponCode = MutableStateFlow("")
+    val couponCode: StateFlow<String> = _couponCode.asStateFlow()
+
+    val totals: StateFlow<TotalsPreview> =
+        combine(_lines, _shippingChoice, _shippingCost, checkout) { lines, shipping, cost, config ->
+            previewTotals(lines, shipping, cost, config)
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, TotalsPreview())
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
@@ -85,6 +137,19 @@ class NewOrderViewModel(
     }
 
     fun onQueryChange(value: String) { _query.value = value }
+
+    fun selectGateway(gateway: PaymentGateway) { _gatewayChoice.value = gateway }
+
+    /** Picks a shipping method (or null for no shipping) and pre-fills its configured cost. */
+    fun selectShipping(option: ShippingOption?) {
+        _shippingChoice.value = option
+        _shippingCost.value = option?.cost?.toBigDecimalOrNull()?.toPlainString()
+            ?: if (option != null) "0" else ""
+    }
+
+    fun setShippingCost(value: String) { _shippingCost.value = value }
+
+    fun setCouponCode(value: String) { _couponCode.value = value }
 
     /** Adds a product to the cart, or bumps its quantity if already present. */
     fun addProduct(product: Product) {
@@ -168,14 +233,28 @@ class NewOrderViewModel(
                     return@launch
                 }
                 val status = orderSettingsRepository.status.first()
+                val config = checkout.value
                 try {
-                    val remoteId = WooCommerceApi(settings).createOrder(
+                    val api = WooCommerceApi(settings)
+                    val order = api.createOrder(
                         customerId = customer.id,
                         lineItems = current.map { WooCommerceApi.LineItem(it.product.id, it.quantity) },
                         status = status.slug,
                         setPaid = status.setPaid,
+                        paymentMethod = selectedGateway.value,
+                        billingJson = customer.billingJson,
+                        shippingJson = customer.shippingJson,
+                        shipping = shippingSelection(config),
+                        couponCode = _couponCode.value,
                     )
-                    _placed.value = PlaceResult.Placed(remoteId)
+                    refreshOrderedProducts(api, current)
+                    _placed.value = PlaceResult.Placed(
+                        remoteId = order.id,
+                        total = order.total,
+                        totalTax = order.totalTax,
+                        shippingTotal = order.shippingTotal,
+                        discountTotal = order.discountTotal,
+                    )
                 } catch (e: Exception) {
                     _message.value = "Couldn't place order: ${e.message}"
                 }
@@ -185,7 +264,68 @@ class NewOrderViewModel(
         }
     }
 
+    /**
+     * Builds the shipping line for the order request. WooCommerce treats `shipping_lines.total`
+     * as a NET amount and adds tax on top, so on tax-inclusive stores the entered (gross) cost is
+     * converted to net first — otherwise the customer would be charged more than web checkout.
+     */
+    private fun shippingSelection(config: CheckoutConfig): WooCommerceApi.ShippingSelection? {
+        val option = _shippingChoice.value ?: return null
+        val gross = _shippingCost.value.toBigDecimalOrNull() ?: BigDecimal.ZERO
+        val rate = config.standardTaxRatePercent
+        val net = if (config.taxesEnabled && config.pricesIncludeTax && option.taxable && rate != null) {
+            gross.divide(BigDecimal.ONE + BigDecimal(rate.toString()).movePointLeft(2), 2, RoundingMode.HALF_UP)
+        } else {
+            gross.setScale(2, RoundingMode.HALF_UP)
+        }
+        return WooCommerceApi.ShippingSelection(option.methodId, option.title, net.toPlainString())
+    }
+
+    /** Pulls fresh copies of the ordered products so local stock reflects the sale. Non-fatal. */
+    private suspend fun refreshOrderedProducts(api: WooCommerceApi, lines: List<CartLine>) {
+        runCatching {
+            val fresh = coroutineScope {
+                lines.map { line -> async { api.fetchProduct(line.product.id) } }.awaitAll()
+            }
+            productRepository.upsert(fresh)
+        }
+    }
+
     fun consumeMessage() { _message.value = null }
+
+    private fun previewTotals(
+        lines: List<CartLine>,
+        shipping: ShippingOption?,
+        shippingCost: String,
+        config: CheckoutConfig,
+    ): TotalsPreview {
+        val subtotal = lines.fold(BigDecimal.ZERO) { acc, line -> acc + line.lineTotal }
+        val shippingAmount = if (shipping != null) {
+            shippingCost.toBigDecimalOrNull() ?: BigDecimal.ZERO
+        } else {
+            null
+        }
+        var total = subtotal + (shippingAmount ?: BigDecimal.ZERO)
+        var tax: BigDecimal? = null
+        val ratePercent = config.standardTaxRatePercent?.takeIf { config.taxesEnabled }
+        if (ratePercent != null) {
+            val rate = BigDecimal(ratePercent.toString()).movePointLeft(2)
+            if (config.pricesIncludeTax) {
+                tax = total - total.divide(BigDecimal.ONE + rate, 2, RoundingMode.HALF_UP)
+            } else {
+                tax = (total * rate).setScale(2, RoundingMode.HALF_UP)
+                total += tax
+            }
+        }
+        return TotalsPreview(
+            subtotal = subtotal,
+            shipping = shippingAmount,
+            tax = tax,
+            taxIncluded = config.pricesIncludeTax,
+            taxLabel = config.taxLabel,
+            total = total,
+        )
+    }
 
     companion object {
         fun factory(
@@ -194,6 +334,7 @@ class NewOrderViewModel(
             productRepository: ProductRepository,
             settingsRepository: SettingsRepository,
             orderSettingsRepository: OrderSettingsRepository,
+            checkoutConfigRepository: CheckoutConfigRepository,
         ) = viewModelFactory {
             initializer {
                 NewOrderViewModel(
@@ -202,6 +343,7 @@ class NewOrderViewModel(
                     productRepository = productRepository,
                     settingsRepository = settingsRepository,
                     orderSettingsRepository = orderSettingsRepository,
+                    checkoutConfigRepository = checkoutConfigRepository,
                 )
             }
         }

@@ -28,8 +28,27 @@ object Routes {
 
     const val ORDER_CONFIRMATION = "order_confirmation"
     const val ORDER_ID_ARG = "orderId"
-    const val ORDER_CONFIRMATION_ROUTE = "$ORDER_CONFIRMATION/{$ORDER_ID_ARG}"
-    fun orderConfirmation(orderId: Long) = "$ORDER_CONFIRMATION/$orderId"
+    const val ORDER_TOTAL_ARG = "total"
+    const val ORDER_TAX_ARG = "tax"
+    const val ORDER_SHIPPING_ARG = "shipping"
+    const val ORDER_DISCOUNT_ARG = "discount"
+    const val ORDER_CONFIRMATION_ROUTE = "$ORDER_CONFIRMATION/{$ORDER_ID_ARG}" +
+        "?$ORDER_TOTAL_ARG={$ORDER_TOTAL_ARG}&$ORDER_TAX_ARG={$ORDER_TAX_ARG}" +
+        "&$ORDER_SHIPPING_ARG={$ORDER_SHIPPING_ARG}&$ORDER_DISCOUNT_ARG={$ORDER_DISCOUNT_ARG}"
+
+    fun orderConfirmation(
+        orderId: Long,
+        total: String,
+        tax: String,
+        shipping: String,
+        discount: String,
+    ): String {
+        // Totals are plain decimal strings from the API; strip anything else so the route is safe.
+        fun clean(amount: String) = amount.filter { it.isDigit() || it == '.' || it == '-' }
+        return "$ORDER_CONFIRMATION/$orderId" +
+            "?$ORDER_TOTAL_ARG=${clean(total)}&$ORDER_TAX_ARG=${clean(tax)}" +
+            "&$ORDER_SHIPPING_ARG=${clean(shipping)}&$ORDER_DISCOUNT_ARG=${clean(discount)}"
+    }
 
     /** Routes that take over the whole screen (no global top bar / bottom nav). */
     fun isFullScreen(route: String?): Boolean =
@@ -82,8 +101,15 @@ fun QuickSaleNavHost(
             NewOrderScreen(
                 customerId = id,
                 onBack = { navController.popBackStack() },
-                onPlaced = { orderId ->
-                    navController.navigate(Routes.orderConfirmation(orderId)) {
+                onPlaced = { result ->
+                    val route = Routes.orderConfirmation(
+                        orderId = result.remoteId,
+                        total = result.total,
+                        tax = result.totalTax,
+                        shipping = result.shippingTotal,
+                        discount = result.discountTotal,
+                    )
+                    navController.navigate(route) {
                         // Don't return to the order builder when leaving the confirmation.
                         popUpTo(Routes.NEW_ORDER_ROUTE) { inclusive = true }
                     }
@@ -92,11 +118,21 @@ fun QuickSaleNavHost(
         }
         composable(
             route = Routes.ORDER_CONFIRMATION_ROUTE,
-            arguments = listOf(navArgument(Routes.ORDER_ID_ARG) { type = NavType.LongType }),
+            arguments = listOf(
+                navArgument(Routes.ORDER_ID_ARG) { type = NavType.LongType },
+                navArgument(Routes.ORDER_TOTAL_ARG) { type = NavType.StringType; defaultValue = "" },
+                navArgument(Routes.ORDER_TAX_ARG) { type = NavType.StringType; defaultValue = "" },
+                navArgument(Routes.ORDER_SHIPPING_ARG) { type = NavType.StringType; defaultValue = "" },
+                navArgument(Routes.ORDER_DISCOUNT_ARG) { type = NavType.StringType; defaultValue = "" },
+            ),
         ) { backStackEntry ->
-            val orderId = backStackEntry.arguments?.getLong(Routes.ORDER_ID_ARG) ?: 0L
+            val args = backStackEntry.arguments
             OrderConfirmationScreen(
-                orderId = orderId,
+                orderId = args?.getLong(Routes.ORDER_ID_ARG) ?: 0L,
+                total = args?.getString(Routes.ORDER_TOTAL_ARG).orEmpty(),
+                totalTax = args?.getString(Routes.ORDER_TAX_ARG).orEmpty(),
+                shippingTotal = args?.getString(Routes.ORDER_SHIPPING_ARG).orEmpty(),
+                discountTotal = args?.getString(Routes.ORDER_DISCOUNT_ARG).orEmpty(),
                 onDone = {
                     navController.popBackStack(TopLevelDestination.CUSTOMERS.route, inclusive = false)
                 },

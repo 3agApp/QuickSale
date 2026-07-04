@@ -18,6 +18,7 @@ import me.sourov.quicksale.data.local.Customer
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.QuickSaleDatabase
 import me.sourov.quicksale.data.remote.WooCommerceApi
+import me.sourov.quicksale.data.settings.CheckoutConfigRepository
 import me.sourov.quicksale.data.settings.CurrencyRepository
 import me.sourov.quicksale.data.settings.SettingsRepository
 import me.sourov.quicksale.data.settings.StoreCurrency
@@ -69,6 +70,12 @@ object SyncManager {
                             val currency = retryOnNetworkBlip { api.fetchCurrency() }
                             CurrencyRepository(appContext.settingsDataStore)
                                 .setCurrency(StoreCurrency(code = currency.code, symbol = currency.symbol))
+                        }
+                        // Refresh checkout behaviour (payment gateways, shipping methods, tax
+                        // rules) for the order screen. Also non-fatal for the same reason.
+                        runCatching {
+                            val config = retryOnNetworkBlip { api.fetchCheckoutConfig() }
+                            CheckoutConfigRepository(appContext.settingsDataStore).setConfig(config)
                         }
                         val products = fetchAllPages(state, target.label) { page -> api.fetchProducts(page) }
                         db.productDao().replaceAll(products)

@@ -10,7 +10,7 @@ import me.sourov.quicksale.BuildConfig
 
 @Database(
     entities = [Product::class, Customer::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class QuickSaleDatabase : RoomDatabase() {
@@ -30,7 +30,7 @@ abstract class QuickSaleDatabase : RoomDatabase() {
         private fun build(context: Context): QuickSaleDatabase =
             Room.databaseBuilder(context, QuickSaleDatabase::class.java, "quicksale.db")
                 .addCallback(SeedCallback)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
 
         /** v2 once stored orders locally; v3 drops them (orders go straight to WooCommerce now). */
@@ -56,6 +56,14 @@ abstract class QuickSaleDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS order_items")
                 db.execSQL("DROP TABLE IF EXISTS orders")
+            }
+        }
+
+        /** v4 stores customers' full billing/shipping addresses for order creation. */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE customers ADD COLUMN billingJson TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE customers ADD COLUMN shippingJson TEXT NOT NULL DEFAULT ''")
             }
         }
 

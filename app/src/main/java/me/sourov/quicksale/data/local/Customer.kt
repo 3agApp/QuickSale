@@ -1,5 +1,6 @@
 package me.sourov.quicksale.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -12,6 +13,10 @@ data class Customer(
     val phone: String,
     val company: String,
     val city: String,
+    /** Raw WooCommerce billing address object (JSON), sent back verbatim when placing orders. */
+    @ColumnInfo(defaultValue = "") val billingJson: String = "",
+    /** Raw WooCommerce shipping address object (JSON); billing is used when this is empty. */
+    @ColumnInfo(defaultValue = "") val shippingJson: String = "",
 ) {
     val fullName: String
         get() = listOf(firstName, lastName).filter { it.isNotBlank() }.joinToString(" ")
