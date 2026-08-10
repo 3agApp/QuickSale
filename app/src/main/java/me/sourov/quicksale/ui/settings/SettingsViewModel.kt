@@ -6,13 +6,12 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import me.sourov.quicksale.data.settings.ConnectionResult
 import me.sourov.quicksale.data.settings.ConnectionTester
-import me.sourov.quicksale.data.settings.HTTPS_SITE_URL_PREFIX
 import me.sourov.quicksale.data.settings.SettingsRepository
 import me.sourov.quicksale.data.settings.StoreSettings
 import me.sourov.quicksale.data.settings.WooKeyParser
 import me.sourov.quicksale.data.settings.hasHttpsSiteUrlHost
 import me.sourov.quicksale.data.settings.normalizeHttpsSiteUrl
-import me.sourov.quicksale.data.settings.toHttpsSiteUrlInput
+import me.sourov.quicksale.data.settings.toSiteHostInput
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,11 +24,15 @@ sealed interface ConnectionTestState {
     data object Idle : ConnectionTestState
     data object Testing : ConnectionTestState
     data class Success(val message: String) : ConnectionTestState
+
+    /** WooCommerce answered but the organization routes didn't — keys fine, plugin not. */
+    data class Partial(val message: String) : ConnectionTestState
     data class Failure(val message: String) : ConnectionTestState
 }
 
 data class SettingsUiState(
-    val siteUrl: String = HTTPS_SITE_URL_PREFIX,
+    /** Just the host — the field renders "https://" as a fixed, non-editable prefix. */
+    val siteHost: String = "",
     val consumerKey: String = "",
     val consumerSecret: String = "",
     val isLoading: Boolean = true,
@@ -44,21 +47,23 @@ data class SettingsUiState(
         get() = consumerKey.isNotBlank() && consumerSecret.isNotBlank()
 
     val isDirty: Boolean
-        get() = siteUrl != saved.siteUrl.toHttpsSiteUrlInput() ||
+        get() = siteHost != saved.siteUrl.toSiteHostInput() ||
             consumerKey != saved.consumerKey ||
             consumerSecret != saved.consumerSecret
 
     val canSave: Boolean
-        get() = !isSaving && isDirty && hasHttpsSiteUrlHost(siteUrl) && hasCredentials
+        get() = !isSaving && isDirty && hasHttpsSiteUrlHost(siteHost) && hasCredentials
 
     val canTest: Boolean
         get() = connectionTest != ConnectionTestState.Testing &&
-            hasHttpsSiteUrlHost(siteUrl) && hasCredentials
+            hasHttpsSiteUrlHost(siteHost) && hasCredentials
 }
 
 class SettingsViewModel(
     private val repository: SettingsRepository,
     private val connectionTester: ConnectionTester,
+    /** Run after credentials change, to discard stale caches and pull the new store. */
+    private val onStoreChanged: suspend () -> Unit = {},
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -73,7 +78,7 @@ class SettingsViewModel(
                 _uiState.update { state ->
                     if (state.isLoading) {
                         state.copy(
-                            siteUrl = stored.siteUrl.toHttpsSiteUrlInput(),
+                            siteHost = stored.siteUrl.toSiteHostInput(),
                             consumerKey = stored.consumerKey,
                             consumerSecret = stored.consumerSecret,
                             saved = stored,
@@ -90,7 +95,7 @@ class SettingsViewModel(
     }
 
     fun onSiteUrlChange(value: String) = _uiState.update {
-        it.copy(siteUrl = value.toHttpsSiteUrlInput(), connectionTest = ConnectionTestState.Idle)
+        it.copy(siteHost = value.toSiteHostInput(), connectionTest = ConnectionTestState.Idle)
     }
 
     fun onConsumerKeyChange(value: String) = _uiState.update {
@@ -127,7 +132,7 @@ class SettingsViewModel(
         if (!state.canTest) return
         viewModelScope.launch {
             _uiState.update { it.copy(connectionTest = ConnectionTestState.Testing) }
-            val normalizedSiteUrl = normalizeHttpsSiteUrl(state.siteUrl)
+            val normalizedSiteUrl = normalizeHttpsSiteUrl(state.siteHost)
                 ?: return@launch _uiState.update {
                     it.copy(connectionTest = ConnectionTestState.Failure("Enter a valid store URL"))
                 }
@@ -142,6 +147,7 @@ class SettingsViewModel(
                 it.copy(
                     connectionTest = when (result) {
                         is ConnectionResult.Success -> ConnectionTestState.Success(result.message)
+                        is ConnectionResult.Partial -> ConnectionTestState.Partial(result.message)
                         is ConnectionResult.Failure -> ConnectionTestState.Failure(result.message)
                     }
                 )
@@ -153,7 +159,7 @@ class SettingsViewModel(
         val state = _uiState.value
         if (!state.canSave) return
         viewModelScope.launch {
-            val normalizedSiteUrl = normalizeHttpsSiteUrl(state.siteUrl)
+            val normalizedSiteUrl = normalizeHttpsSiteUrl(state.siteHost)
                 ?: return@launch _messages.send("Enter a valid store URL")
             _uiState.update { it.copy(isSaving = true) }
             repository.update(
@@ -164,7 +170,10 @@ class SettingsViewModel(
                 )
             )
             _uiState.update { it.copy(isSaving = false) }
-            _messages.send("Store settings saved")
+            // New credentials can mean a different store entirely, so any cached ETags and the
+            // data they describe are stale by definition — hand off and pull everything fresh.
+            onStoreChanged()
+            _messages.send("Store settings saved — syncing")
         }
     }
 
@@ -172,8 +181,9 @@ class SettingsViewModel(
         fun factory(
             repository: SettingsRepository,
             connectionTester: ConnectionTester = ConnectionTester(),
+            onStoreChanged: suspend () -> Unit = {},
         ) = viewModelFactory {
-            initializer { SettingsViewModel(repository, connectionTester) }
+            initializer { SettingsViewModel(repository, connectionTester, onStoreChanged) }
         }
     }
 }

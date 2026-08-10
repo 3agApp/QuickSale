@@ -15,17 +15,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Inventory2
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,11 +44,18 @@ import androidx.paging.LoadState
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import coil.compose.AsyncImage
+import me.sourov.quicksale.appContainer
 import me.sourov.quicksale.data.local.Product
-import me.sourov.quicksale.data.local.ProductRepository
-import me.sourov.quicksale.data.local.QuickSaleDatabase
+import me.sourov.quicksale.data.sync.SyncManager
+import me.sourov.quicksale.data.sync.SyncTarget
 import me.sourov.quicksale.ui.CurrencyFormatter
+import me.sourov.quicksale.ui.components.EmptyState
+import me.sourov.quicksale.ui.components.LoadingState
+import me.sourov.quicksale.ui.components.QuickSaleCard
+import me.sourov.quicksale.ui.theme.Sizes
+import me.sourov.quicksale.ui.theme.Spacing
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProductsScreen(
     query: String,
@@ -57,44 +63,65 @@ fun ProductsScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val repository = remember {
-        ProductRepository(QuickSaleDatabase.getInstance(context).productDao())
-    }
+    val repository = remember(context) { context.appContainer.products }
     val viewModel: ProductsViewModel = viewModel(factory = ProductsViewModel.factory(repository))
 
     LaunchedEffect(query) { viewModel.setQuery(query) }
 
     val products = viewModel.products.collectAsLazyPagingItems()
     val count by viewModel.matchingCount.collectAsStateWithLifecycle()
+    val syncState by SyncManager.state(SyncTarget.Products).collectAsStateWithLifecycle()
 
-    Column(modifier = modifier.fillMaxSize()) {
-        Text(
-            text = "$count ${if (count == 1) "product" else "products"}",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 6.dp),
-        )
-
-        val refreshing = products.loadState.refresh is LoadState.Loading
-        when {
-            refreshing && products.itemCount == 0 -> LoadingState()
-            products.itemCount == 0 -> EmptyState(
-                message = if (query.isBlank()) {
-                    "No products yet. Sync from the Home screen to pull your catalog."
-                } else {
-                    "No products match \"$query\"."
-                },
+    PullToRefreshBox(
+        isRefreshing = syncState.isRunning,
+        onRefresh = { SyncManager.syncProducts(context) },
+        modifier = modifier.fillMaxSize(),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Text(
+                text = "$count ${if (count == 1) "product" else "products"}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(
+                    start = Spacing.screen,
+                    top = Spacing.md,
+                    bottom = Spacing.xs,
+                ),
             )
-            else -> LazyColumn(
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(
-                    count = products.itemCount,
-                    key = products.itemKey { it.id },
-                ) { index ->
-                    products[index]?.let { product ->
-                        ProductRow(product = product, onClick = { onProductClick(product.id) })
+
+            val refreshing = products.loadState.refresh is LoadState.Loading
+            when {
+                refreshing && products.itemCount == 0 -> LoadingState()
+
+                products.itemCount == 0 && query.isNotBlank() -> EmptyState(
+                    icon = Icons.Filled.Inventory2,
+                    title = "No matches",
+                    message = "No product matches \"$query\".",
+                )
+
+                products.itemCount == 0 -> EmptyState(
+                    icon = Icons.Filled.Inventory2,
+                    title = "No products yet",
+                    message = "Sync your catalog to scan and sell.",
+                    actionLabel = if (syncState.isRunning) null else "Sync now",
+                    onAction = { SyncManager.syncProducts(context) },
+                )
+
+                else -> LazyColumn(
+                    contentPadding = PaddingValues(
+                        start = Spacing.screen,
+                        end = Spacing.screen,
+                        bottom = Spacing.screen,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                ) {
+                    items(
+                        count = products.itemCount,
+                        key = products.itemKey { it.id },
+                    ) { index ->
+                        products[index]?.let { product ->
+                            ProductRow(product = product, onClick = { onProductClick(product.id) })
+                        }
                     }
                 }
             }
@@ -104,22 +131,17 @@ fun ProductsScreen(
 
 @Composable
 private fun ProductRow(product: Product, onClick: () -> Unit) {
-    ElevatedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-    ) {
+    QuickSaleCard(modifier = Modifier.clickable(onClick = onClick)) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(Spacing.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ProductThumbnail(product.imageUrl, size = 64.dp)
-            Spacer(Modifier.width(14.dp))
+            ProductThumbnail(product.imageUrl, size = Sizes.thumbnail)
+            Spacer(Modifier.width(Spacing.md))
             Column(Modifier.weight(1f)) {
                 Text(
                     text = product.name,
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -132,10 +154,10 @@ private fun ProductRow(product: Product, onClick: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(Spacing.sm))
                 StockBadge(product)
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Spacing.sm))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = product.price.asPrice(),
@@ -143,7 +165,7 @@ private fun ProductRow(product: Product, onClick: () -> Unit) {
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(Spacing.xs))
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,
@@ -199,53 +221,13 @@ fun StockBadge(product: Product) {
             MaterialTheme.colorScheme.onSecondaryContainer,
         )
     }
-    Surface(color = container, shape = RoundedCornerShape(6.dp)) {
+    Surface(color = container, shape = MaterialTheme.shapes.extraSmall) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = content,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = 3.dp),
         )
-    }
-}
-
-@Composable
-private fun LoadingState() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
-    }
-}
-
-@Composable
-private fun EmptyState(message: String) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                modifier = Modifier
-                    .size(72.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainer),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Inventory2,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(32.dp),
-                )
-            }
-            Spacer(Modifier.height(14.dp))
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }
 

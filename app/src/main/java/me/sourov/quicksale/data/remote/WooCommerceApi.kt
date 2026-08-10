@@ -1,68 +1,56 @@
 package me.sourov.quicksale.data.remote
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import me.sourov.quicksale.data.local.Customer
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.settings.CheckoutConfig
 import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.ShippingOption
-import me.sourov.quicksale.data.settings.normalizeHttpsSiteUrl
 import me.sourov.quicksale.data.settings.StoreSettings
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
 
-/** Minimal WooCommerce REST client for pulling the catalog and customers. */
-class WooCommerceApi(private val settings: StoreSettings) {
+/**
+ * WooCommerce's own `/wc/v3` routes: the catalog, the store's checkout configuration, and orders.
+ *
+ * Orders go through here rather than a plugin-specific route — the organization layer is a handful
+ * of extra fields on WooCommerce's standard order endpoint, so line items, tax, coupons and stock
+ * all behave exactly as they do for any other order.
+ */
+class WooCommerceApi(settings: StoreSettings) {
+
+    private val http = WooHttp(settings)
 
     data class Page<T>(val items: List<T>, val totalPages: Int)
 
-    suspend fun fetchProducts(page: Int, perPage: Int = 100): Page<Product> =
-        fetchPage("products", page, perPage) { it.toProduct() }
+    suspend fun fetchProducts(page: Int, perPage: Int = 100): Page<Product> {
+        val response = http.get(
+            path = "wc/v3/products",
+            query = mapOf("page" to page.toString(), "per_page" to perPage.toString()),
+        )
+        val array = JSONArray(response.body)
+        val items = buildList(array.length()) {
+            for (i in 0 until array.length()) add(array.getJSONObject(i).toProduct())
+        }
+        return Page(items, response.totalPages)
+    }
 
-    suspend fun fetchCustomers(page: Int, perPage: Int = 100): Page<Customer> =
-        fetchPage("customers", page, perPage, extraQuery = "&role=all") { it.toCustomer() }
+    /** A single fresh product (e.g. to refresh local stock right after an order). */
+    suspend fun fetchProduct(id: Long): Product =
+        JSONObject(http.get("wc/v3/products/$id").body).toProduct()
 
     /** The store's active display currency. */
     data class Currency(val code: String, val symbol: String)
 
     /**
-     * Reads the store's current currency from `/wc/v3/data/currencies/current`
-     * so prices render with the right symbol (e.g. £, €, ৳) instead of a hardcoded $.
+     * Reads the store's current currency from `/wc/v3/data/currencies/current` so prices render
+     * with the right symbol (e.g. £, €, ৳) instead of a hardcoded $.
      */
-    suspend fun fetchCurrency(): Currency = withContext(Dispatchers.IO) {
-        val base = normalizeHttpsSiteUrl(settings.siteUrl)
-            ?: throw IllegalStateException("Invalid store URL")
-        val ck = URLEncoder.encode(settings.consumerKey.trim(), "UTF-8")
-        val cs = URLEncoder.encode(settings.consumerSecret.trim(), "UTF-8")
-        val endpoint =
-            "$base/wp-json/wc/v3/data/currencies/current?consumer_key=$ck&consumer_secret=$cs"
-
-        var connection: HttpURLConnection? = null
-        try {
-            connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 20_000
-                readTimeout = 20_000
-                setRequestProperty("Accept", "application/json")
-            }
-            val code = connection.responseCode
-            if (code !in 200..299) {
-                throw IllegalStateException("Store returned HTTP $code while loading currency")
-            }
-            val body = connection.inputStream.bufferedReader().use { it.readText() }
-            val json = JSONObject(body)
-            Currency(
-                code = json.optString("code"),
-                // WooCommerce sometimes returns the symbol as an HTML entity (e.g. "&#36;").
-                symbol = json.optString("symbol").decodeHtmlEntities(),
-            )
-        } finally {
-            connection?.disconnect()
-        }
+    suspend fun fetchCurrency(): Currency {
+        val json = JSONObject(http.get("wc/v3/data/currencies/current").body)
+        return Currency(
+            code = json.optString("code"),
+            // WooCommerce sometimes returns the symbol as an HTML entity (e.g. "&#36;").
+            symbol = json.optString("symbol").decodeHtmlEntities(),
+        )
     }
 
     /** A product line to send when creating an order. */
@@ -71,6 +59,27 @@ class WooCommerceApi(private val settings: StoreSettings) {
     /** A shipping charge to attach to an order. [total] is the net (pre-tax) amount. */
     data class ShippingSelection(val methodId: String, val methodTitle: String, val total: String)
 
+    /**
+     * Where an order is being delivered.
+     *
+     * The store decides whether an order needs a destination at all by looking at its shipping
+     * lines, not its products — so a walk-out sale is [None] and is stamped with location `0`.
+     */
+    sealed interface Destination {
+        /** No delivery: no shipping lines, no location. */
+        data object None : Destination
+
+        /** One of the organization's saved locations, resolved server-side against the member. */
+        data class Location(val id: Long) : Destination
+
+        /**
+         * A typed address, allowed only when the organization permits custom shipping. The map is
+         * keyed by the field names the address form supplied, and the store validates it with the
+         * same rules its checkout applies.
+         */
+        data class OneOff(val fields: Map<String, String>) : Destination
+    }
+
     /** Totals WooCommerce calculated for a newly created order (tax included where configured). */
     data class CreatedOrder(
         val id: Long,
@@ -78,38 +87,37 @@ class WooCommerceApi(private val settings: StoreSettings) {
         val totalTax: String,
         val shippingTotal: String,
         val discountTotal: String,
+        val organizationName: String,
+        val locationName: String,
     )
 
     /**
-     * Creates an order in WooCommerce and returns the totals the store calculated (the store is
-     * authoritative for tax). Billing/shipping addresses are passed as the raw JSON objects the
-     * customers endpoint returned; when the shipping address is empty the billing address is
-     * reused, matching web-checkout behaviour.
+     * Creates an order and returns the totals the store calculated (the store is authoritative for
+     * tax, and re-runs every organization rule regardless of what the app believes).
+     *
+     * [customerId] must be the member's WordPress `user_id` from the organization snapshot — that
+     * is what makes the order the member's, putting it in their *My orders*, their organization's
+     * order list and the customer emails. The API key only identifies the till.
+     *
+     * No billing block is sent: the store writes the organization's own billing address over
+     * anything posted, so sending one changes nothing.
      *
      * @param status WooCommerce status slug (e.g. "processing").
      * @param setPaid whether to mark the order paid (records a payment date).
      * @param couponCode optional coupon the store validates and applies server-side.
+     * @throws WooApiException with `woap_rest_cannot_purchase`, `woap_rest_shipping_destination`
+     *   or `woap_rest_shipping_address` when the store refuses. No order exists after a refusal.
      */
     suspend fun createOrder(
         customerId: Long,
         lineItems: List<LineItem>,
         status: String,
         setPaid: Boolean,
+        destination: Destination,
         paymentMethod: PaymentGateway? = null,
-        billingJson: String? = null,
-        shippingJson: String? = null,
         shipping: ShippingSelection? = null,
         couponCode: String? = null,
-    ): CreatedOrder = withContext(Dispatchers.IO) {
-        val base = normalizeHttpsSiteUrl(settings.siteUrl)
-            ?: throw IllegalStateException("Invalid store URL")
-        val ck = URLEncoder.encode(settings.consumerKey.trim(), "UTF-8")
-        val cs = URLEncoder.encode(settings.consumerSecret.trim(), "UTF-8")
-        val endpoint = "$base/wp-json/wc/v3/orders?consumer_key=$ck&consumer_secret=$cs"
-
-        val billing = billingJson.toAddressOrNull()
-        val shippingAddress = shippingJson.toAddressOrNull() ?: billing
-
+    ): CreatedOrder {
         val payload = JSONObject().apply {
             put("customer_id", customerId)
             put("status", status)
@@ -118,8 +126,13 @@ class WooCommerceApi(private val settings: StoreSettings) {
                 put("payment_method", it.id)
                 put("payment_method_title", it.title)
             }
-            billing?.let { put("billing", it) }
-            shippingAddress?.let { put("shipping", it) }
+            when (destination) {
+                is Destination.Location -> put("woap_location_id", destination.id)
+                is Destination.OneOff -> put("shipping", JSONObject().apply {
+                    destination.fields.forEach { (name, value) -> put(name, value) }
+                })
+                Destination.None -> Unit
+            }
             put("line_items", JSONArray().apply {
                 lineItems.forEach { item ->
                     put(JSONObject().apply {
@@ -140,38 +153,17 @@ class WooCommerceApi(private val settings: StoreSettings) {
             }
         }
 
-        var connection: HttpURLConnection? = null
-        try {
-            connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 20_000
-                readTimeout = 20_000
-                doOutput = true
-                setRequestProperty("Accept", "application/json")
-                setRequestProperty("Content-Type", "application/json")
-            }
-            connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
-            val code = connection.responseCode
-            if (code !in 200..299) {
-                throw IllegalStateException(errorMessage(connection, code))
-            }
-            val body = connection.inputStream.bufferedReader().use { it.readText() }
-            val order = JSONObject(body)
-            CreatedOrder(
-                id = order.optLong("id"),
-                total = order.optString("total"),
-                totalTax = order.optString("total_tax"),
-                shippingTotal = order.optString("shipping_total"),
-                discountTotal = order.optString("discount_total"),
-            )
-        } finally {
-            connection?.disconnect()
-        }
-    }
-
-    /** A single fresh product (e.g. to refresh local stock right after an order). */
-    suspend fun fetchProduct(id: Long): Product = withContext(Dispatchers.IO) {
-        JSONObject(getBody("products/$id")).toProduct()
+        val order = JSONObject(http.post("wc/v3/orders", payload).body)
+        return CreatedOrder(
+            id = order.optLong("id"),
+            total = order.optString("total"),
+            totalTax = order.optString("total_tax"),
+            shippingTotal = order.optString("shipping_total"),
+            discountTotal = order.optString("discount_total"),
+            // Read-only stamps the plugin adds; both are snapshots taken at order time.
+            organizationName = order.optString("woap_organization_name").decodeHtmlEntities(),
+            locationName = order.optString("woap_location_name").decodeHtmlEntities(),
+        )
     }
 
     /**
@@ -179,8 +171,8 @@ class WooCommerceApi(private val settings: StoreSettings) {
      * across all zones, and tax settings. Each section degrades independently so a store without
      * (say) shipping zones still yields its gateways.
      */
-    suspend fun fetchCheckoutConfig(): CheckoutConfig = withContext(Dispatchers.IO) {
-        val general = runCatching { JSONArray(getBody("settings/general")).settingsMap() }
+    suspend fun fetchCheckoutConfig(): CheckoutConfig {
+        val general = runCatching { JSONArray(body("wc/v3/settings/general")).settingsMap() }
             .getOrDefault(emptyMap())
         val taxesEnabled = general["woocommerce_calc_taxes"] == "yes"
         // "CH:BL" → "CH"; used to pick the tax rate that applies at the store's base.
@@ -191,11 +183,11 @@ class WooCommerceApi(private val settings: StoreSettings) {
         var taxLabel = "Tax"
         if (taxesEnabled) {
             runCatching {
-                val tax = JSONArray(getBody("settings/tax")).settingsMap()
+                val tax = JSONArray(body("wc/v3/settings/tax")).settingsMap()
                 pricesIncludeTax = tax["woocommerce_prices_include_tax"] == "yes"
             }
             runCatching {
-                val rates = JSONArray(getBody("taxes?per_page=100"))
+                val rates = JSONArray(body("wc/v3/taxes", mapOf("per_page" to "100")))
                 var chosen: JSONObject? = null
                 for (i in 0 until rates.length()) {
                     val rate = rates.getJSONObject(i)
@@ -215,7 +207,7 @@ class WooCommerceApi(private val settings: StoreSettings) {
         }
 
         val gateways = runCatching {
-            val array = JSONArray(getBody("payment_gateways"))
+            val array = JSONArray(body("wc/v3/payment_gateways"))
             buildList {
                 for (i in 0 until array.length()) {
                     val gateway = array.getJSONObject(i)
@@ -228,11 +220,11 @@ class WooCommerceApi(private val settings: StoreSettings) {
         }.getOrDefault(emptyList())
 
         val shippingOptions = runCatching {
-            val zones = JSONArray(getBody("shipping/zones"))
+            val zones = JSONArray(body("wc/v3/shipping/zones"))
             buildList {
                 for (i in 0 until zones.length()) {
                     val zone = zones.getJSONObject(i)
-                    val methods = JSONArray(getBody("shipping/zones/${zone.optLong("id")}/methods"))
+                    val methods = JSONArray(body("wc/v3/shipping/zones/${zone.optLong("id")}/methods"))
                     for (j in 0 until methods.length()) {
                         val method = methods.getJSONObject(j)
                         if (!method.optBoolean("enabled")) continue
@@ -253,7 +245,7 @@ class WooCommerceApi(private val settings: StoreSettings) {
             }
         }.getOrDefault(emptyList())
 
-        CheckoutConfig(
+        return CheckoutConfig(
             taxesEnabled = taxesEnabled,
             pricesIncludeTax = pricesIncludeTax,
             standardTaxRatePercent = ratePercent,
@@ -263,43 +255,8 @@ class WooCommerceApi(private val settings: StoreSettings) {
         )
     }
 
-    /** Performs an authenticated GET for `/wc/v3/[pathAndQuery]` and returns the response body. */
-    private fun getBody(pathAndQuery: String): String {
-        val base = normalizeHttpsSiteUrl(settings.siteUrl)
-            ?: throw IllegalStateException("Invalid store URL")
-        val ck = URLEncoder.encode(settings.consumerKey.trim(), "UTF-8")
-        val cs = URLEncoder.encode(settings.consumerSecret.trim(), "UTF-8")
-        val separator = if ('?' in pathAndQuery) '&' else '?'
-        val endpoint =
-            "$base/wp-json/wc/v3/$pathAndQuery${separator}consumer_key=$ck&consumer_secret=$cs"
-
-        var connection: HttpURLConnection? = null
-        try {
-            connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 20_000
-                readTimeout = 20_000
-                setRequestProperty("Accept", "application/json")
-            }
-            val code = connection.responseCode
-            if (code !in 200..299) {
-                throw IllegalStateException(errorMessage(connection, code))
-            }
-            return connection.inputStream.bufferedReader().use { it.readText() }
-        } finally {
-            connection?.disconnect()
-        }
-    }
-
-    /** Extracts WooCommerce's human-readable `message` from an error response, if present. */
-    private fun errorMessage(connection: HttpURLConnection, code: Int): String {
-        val detail = runCatching {
-            connection.errorStream?.bufferedReader()?.use { it.readText() }
-                ?.let { JSONObject(it).optString("message") }
-                ?.stripHtml()
-        }.getOrNull()
-        return if (detail.isNullOrBlank()) "Store returned HTTP $code" else detail
-    }
+    private suspend fun body(path: String, query: Map<String, String> = emptyMap()): String =
+        http.get(path, query).body
 
     /** `[{id, value}, …]` settings arrays → `id → value` map. */
     private fun JSONArray.settingsMap(): Map<String, String> = buildMap {
@@ -312,57 +269,6 @@ class WooCommerceApi(private val settings: StoreSettings) {
     private fun JSONObject?.settingValue(key: String): String =
         this?.optJSONObject(key)?.optString("value").orEmpty()
 
-    /**
-     * Parses a stored address JSON and returns it only when it carries actual address data;
-     * a customer whose profile is blank should not overwrite the order with empty fields.
-     */
-    private fun String?.toAddressOrNull(): JSONObject? {
-        if (this.isNullOrBlank()) return null
-        val address = runCatching { JSONObject(this) }.getOrNull() ?: return null
-        val hasContent = listOf(
-            "first_name", "last_name", "company", "address_1", "city", "postcode", "country",
-        ).any { address.optString(it).isNotBlank() }
-        return if (hasContent) address else null
-    }
-
-    private suspend fun <T> fetchPage(
-        resource: String,
-        page: Int,
-        perPage: Int,
-        extraQuery: String = "",
-        map: (JSONObject) -> T,
-    ): Page<T> = withContext(Dispatchers.IO) {
-        val base = normalizeHttpsSiteUrl(settings.siteUrl)
-            ?: throw IllegalStateException("Invalid store URL")
-        val ck = URLEncoder.encode(settings.consumerKey.trim(), "UTF-8")
-        val cs = URLEncoder.encode(settings.consumerSecret.trim(), "UTF-8")
-        val endpoint =
-            "$base/wp-json/wc/v3/$resource?per_page=$perPage&page=$page&consumer_key=$ck&consumer_secret=$cs$extraQuery"
-
-        var connection: HttpURLConnection? = null
-        try {
-            connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 20_000
-                readTimeout = 20_000
-                setRequestProperty("Accept", "application/json")
-            }
-            val code = connection.responseCode
-            if (code !in 200..299) {
-                throw IllegalStateException("Store returned HTTP $code while loading $resource")
-            }
-            val totalPages = connection.getHeaderField("X-WP-TotalPages")?.toIntOrNull() ?: 1
-            val body = connection.inputStream.bufferedReader().use { it.readText() }
-            val array = JSONArray(body)
-            val items = buildList(array.length()) {
-                for (i in 0 until array.length()) add(map(array.getJSONObject(i)))
-            }
-            Page(items, totalPages)
-        } finally {
-            connection?.disconnect()
-        }
-    }
-
     private fun JSONObject.toProduct(): Product {
         val firstImage = optJSONArray("images")
             ?.takeIf { it.length() > 0 }
@@ -372,7 +278,7 @@ class WooCommerceApi(private val settings: StoreSettings) {
         val categoryNames = optJSONArray("categories").namesList("name")
         return Product(
             id = optLong("id"),
-            name = optString("name"),
+            name = optString("name").decodeHtmlEntities(),
             sku = optString("sku"),
             price = optString("price"),
             regularPrice = optString("regular_price"),
@@ -385,22 +291,6 @@ class WooCommerceApi(private val settings: StoreSettings) {
         )
     }
 
-    private fun JSONObject.toCustomer(): Customer {
-        val billing = optJSONObject("billing")
-        val shipping = optJSONObject("shipping")
-        return Customer(
-            id = optLong("id"),
-            firstName = optString("first_name"),
-            lastName = optString("last_name"),
-            email = optString("email"),
-            phone = billing?.optString("phone").orEmpty(),
-            company = billing?.optString("company").orEmpty(),
-            city = billing?.optString("city").orEmpty(),
-            billingJson = billing?.toString().orEmpty(),
-            shippingJson = shipping?.toString().orEmpty(),
-        )
-    }
-
     private fun JSONArray?.namesList(key: String): List<String> {
         if (this == null) return emptyList()
         return buildList {
@@ -409,34 +299,4 @@ class WooCommerceApi(private val settings: StoreSettings) {
             }
         }
     }
-
-    private fun String.stripHtml(): String =
-        replace(Regex("<[^>]*>"), "")
-            .replace("&amp;", "&")
-            .replace("&nbsp;", " ")
-            .replace("&#8211;", "-")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-
-    /** Decodes numeric (`&#36;`, `&#x24;`) and a few named HTML entities used by currency symbols. */
-    private fun String.decodeHtmlEntities(): String {
-        if ('&' !in this) return this
-        return Regex("&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);").replace(this) { match ->
-            val entity = match.groupValues[1]
-            val codePoint = when {
-                entity.startsWith("#x") -> entity.drop(2).toIntOrNull(16)
-                entity.startsWith("#") -> entity.drop(1).toIntOrNull()
-                else -> namedEntities[entity]
-            }
-            codePoint?.let { String(Character.toChars(it)) } ?: match.value
-        }
-    }
-
-    private companion object {
-        val namedEntities = mapOf(
-            "amp" to '&'.code, "lt" to '<'.code, "gt" to '>'.code, "nbsp" to ' '.code,
-            "pound" to '£'.code, "euro" to '€'.code, "yen" to '¥'.code, "cent" to '¢'.code,
-        )
-    }
-
 }

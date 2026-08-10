@@ -1,9 +1,17 @@
 package me.sourov.quicksale.ui.orders
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,12 +21,12 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -27,6 +35,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,10 +62,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -65,43 +72,52 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import me.sourov.quicksale.data.local.CustomerRepository
+import me.sourov.quicksale.appContainer
 import me.sourov.quicksale.data.local.Product
-import me.sourov.quicksale.data.local.ProductRepository
-import me.sourov.quicksale.data.local.QuickSaleDatabase
-import me.sourov.quicksale.data.settings.CheckoutConfigRepository
-import me.sourov.quicksale.data.settings.OrderSettingsRepository
 import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.ShippingOption
-import me.sourov.quicksale.data.settings.SettingsRepository
-import me.sourov.quicksale.data.settings.settingsDataStore
+import me.sourov.quicksale.ui.components.QuickSaleCard
+import me.sourov.quicksale.ui.components.SectionHeader
 import me.sourov.quicksale.ui.products.ProductThumbnail
 import me.sourov.quicksale.ui.products.asPrice
+import me.sourov.quicksale.ui.theme.Sizes
+import me.sourov.quicksale.ui.theme.Spacing
 import java.math.BigDecimal
 import java.math.RoundingMode
 
+/**
+ * The order builder: cart, delivery and payment, with the running total always in view.
+ *
+ * The order belongs to a member of an organization, which is why both ids identify this screen —
+ * the member's WordPress user id becomes the order's customer.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewOrderScreen(
-    customerId: Long,
+    organizationId: Long,
+    memberUserId: Long,
     onBack: () -> Unit,
     onPlaced: (result: PlaceResult.Placed) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val database = remember { QuickSaleDatabase.getInstance(context) }
+    val container = remember(context) { context.appContainer }
     val viewModel: NewOrderViewModel = viewModel(
         factory = NewOrderViewModel.factory(
-            customerId = customerId,
-            customerRepository = CustomerRepository(database.customerDao()),
-            productRepository = ProductRepository(database.productDao()),
-            settingsRepository = SettingsRepository(context.applicationContext.settingsDataStore),
-            orderSettingsRepository = OrderSettingsRepository(context.applicationContext.settingsDataStore),
-            checkoutConfigRepository = CheckoutConfigRepository(context.applicationContext.settingsDataStore),
+            organizationId = organizationId,
+            memberUserId = memberUserId,
+            organizationRepository = container.organizations,
+            productRepository = container.products,
+            settingsRepository = container.settings,
+            orderSettingsRepository = container.orderSettings,
+            checkoutConfigRepository = container.checkoutConfig,
+            addressFormRepository = container.addressForms,
         ),
     )
 
-    val customer by viewModel.customer.collectAsStateWithLifecycle()
+    val organization by viewModel.organization.collectAsStateWithLifecycle()
+    val member by viewModel.member.collectAsStateWithLifecycle()
+    val locations by viewModel.locations.collectAsStateWithLifecycle()
     val lines by viewModel.lines.collectAsStateWithLifecycle()
     val totals by viewModel.totals.collectAsStateWithLifecycle()
     val itemCount by viewModel.itemCount.collectAsStateWithLifecycle()
@@ -110,11 +126,18 @@ fun NewOrderScreen(
     val placing by viewModel.placing.collectAsStateWithLifecycle()
     val placed by viewModel.placed.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
+    val blocker by viewModel.blocker.collectAsStateWithLifecycle()
     val checkout by viewModel.checkout.collectAsStateWithLifecycle()
     val selectedGateway by viewModel.selectedGateway.collectAsStateWithLifecycle()
     val selectedShipping by viewModel.selectedShipping.collectAsStateWithLifecycle()
     val shippingCost by viewModel.shippingCost.collectAsStateWithLifecycle()
     val couponCode by viewModel.couponCode.collectAsStateWithLifecycle()
+    val delivery by viewModel.delivery.collectAsStateWithLifecycle()
+    val addressForms by viewModel.addressForms.collectAsStateWithLifecycle()
+    val oneOffCountry by viewModel.oneOffCountry.collectAsStateWithLifecycle()
+    val oneOffFields by viewModel.oneOffFields.collectAsStateWithLifecycle()
+    val oneOffValues by viewModel.oneOffValues.collectAsStateWithLifecycle()
 
     val snackbar = remember { SnackbarHostState() }
 
@@ -137,11 +160,16 @@ fun NewOrderScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("Order")
-                        customer?.let {
+                        Text(
+                            text = member?.name?.ifBlank { member?.email.orEmpty() } ?: "New order",
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        organization?.let {
                             Text(
-                                it.fullName,
-                                style = MaterialTheme.typography.bodyMedium,
+                                text = it.name,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -157,62 +185,13 @@ fun NewOrderScreen(
             )
         },
         bottomBar = {
-            Surface(shadowElevation = 8.dp) {
-                Column(
-                    modifier = Modifier
-                        .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
-                        .padding(16.dp),
-                ) {
-                    if (totals.shipping != null || totals.tax != null) {
-                        SummaryRow("Subtotal", totals.subtotal.display())
-                        totals.shipping?.let { SummaryRow("Shipping", it.display()) }
-                        totals.tax?.let { tax ->
-                            SummaryRow(
-                                if (totals.taxIncluded) {
-                                    "Incl. ${totals.taxLabel} (est.)"
-                                } else {
-                                    "${totals.taxLabel} (est.)"
-                                },
-                                tax.display(),
-                            )
-                        }
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            "Total ($itemCount ${if (itemCount == 1) "item" else "items"})",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            totals.total.display(),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    Button(
-                        onClick = viewModel::placeOrder,
-                        enabled = lines.isNotEmpty() && customer != null && !placing,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                    ) {
-                        if (placing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                            )
-                        } else {
-                            Text("Place order")
-                        }
-                    }
-                }
-            }
+            OrderTotalsBar(
+                totals = totals,
+                itemCount = itemCount,
+                placing = placing,
+                blocker = blocker,
+                onPlace = viewModel::placeOrder,
+            )
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
@@ -220,8 +199,17 @@ fun NewOrderScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = Spacing.screen),
         ) {
+            // A fatal refusal is worth showing before anything is rung up, not after.
+            AnimatedVisibility(
+                visible = blocker?.fatal == true,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically(),
+            ) {
+                RefusalBanner(text = blocker?.reason.orEmpty())
+            }
+
             OutlinedTextField(
                 value = query,
                 onValueChange = viewModel::onQueryChange,
@@ -245,7 +233,7 @@ fun NewOrderScreen(
                 keyboardActions = KeyboardActions(onSearch = { viewModel.submitTyped() }),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp),
+                    .padding(vertical = Spacing.md),
             )
 
             when {
@@ -264,7 +252,10 @@ fun NewOrderScreen(
 
                 lines.isEmpty() -> ScanEmptyState()
 
-                else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = Spacing.xl),
+                ) {
                     items(lines, key = { it.product.id }) { line ->
                         CartLineRow(
                             name = line.product.name,
@@ -276,7 +267,32 @@ fun NewOrderScreen(
                         )
                         HorizontalDivider()
                     }
+
+                    item(key = "delivery") {
+                        Spacer(Modifier.height(Spacing.xl))
+                        SectionHeader(
+                            title = "Delivery",
+                            subtitle = "The store applies ${organization?.name.orEmpty()}'s billing address itself",
+                        )
+                        Spacer(Modifier.height(Spacing.sectionGap))
+                        DeliverySection(
+                            locations = locations,
+                            delivery = delivery,
+                            onSelectDelivery = viewModel::selectDelivery,
+                            allowCustomShipping = organization?.allowCustomShipping == true,
+                            addressForms = addressForms,
+                            oneOffCountry = oneOffCountry,
+                            oneOffFields = oneOffFields,
+                            oneOffValues = oneOffValues,
+                            onSelectCountry = viewModel::selectOneOffCountry,
+                            onFieldChange = viewModel::setOneOffField,
+                        )
+                    }
+
                     item(key = "checkout_options") {
+                        Spacer(Modifier.height(Spacing.lg))
+                        SectionHeader(title = "Payment & charges")
+                        Spacer(Modifier.height(Spacing.sectionGap))
                         CheckoutOptions(
                             gateways = checkout.gateways,
                             selectedGateway = selectedGateway,
@@ -292,6 +308,103 @@ fun NewOrderScreen(
                     }
                 }
             }
+        }
+    }
+
+    error?.let { OrderErrorDialog(error = it, onDismiss = viewModel::consumeError) }
+}
+
+/** The persistent totals + place button. Always visible, so the price is never a surprise. */
+@Composable
+private fun OrderTotalsBar(
+    totals: TotalsPreview,
+    itemCount: Int,
+    placing: Boolean,
+    blocker: PlaceBlocker?,
+    onPlace: () -> Unit,
+) {
+    Surface(shadowElevation = 8.dp) {
+        Column(
+            modifier = Modifier
+                .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                .padding(Spacing.screen),
+        ) {
+            if (totals.shipping != null || totals.tax != null) {
+                SummaryRow("Subtotal", totals.subtotal.display())
+                totals.shipping?.let { SummaryRow("Shipping", it.display()) }
+                totals.tax?.let { tax ->
+                    SummaryRow(
+                        if (totals.taxIncluded) {
+                            "Incl. ${totals.taxLabel} (est.)"
+                        } else {
+                            "${totals.taxLabel} (est.)"
+                        },
+                        tax.display(),
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = Spacing.md),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    "Total ($itemCount ${if (itemCount == 1) "item" else "items"})",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    totals.total.display(),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Button(
+                onClick = onPlace,
+                enabled = blocker == null && !placing,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(Sizes.button),
+            ) {
+                if (placing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    // The button says why it's unavailable rather than just being greyed out.
+                    Text(blocker?.reason ?: "Place order")
+                }
+            }
+        }
+    }
+}
+
+/** Shown when the account or member simply can't buy — the cart is a waste of time until fixed. */
+@Composable
+private fun RefusalBanner(text: String) {
+    QuickSaleCard(
+        modifier = Modifier.padding(top = Spacing.md),
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.ErrorOutline,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(Sizes.iconLarge),
+            )
+            Spacer(Modifier.width(Spacing.md))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
         }
     }
 }
@@ -312,7 +425,7 @@ private fun ProductResultRow(product: Product, modifier: Modifier = Modifier) {
         },
         supportingContent = {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(product.price.asPrice(), style = MaterialTheme.typography.titleSmall)
@@ -340,19 +453,19 @@ private fun CartLineRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(vertical = Spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 name,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 "${priceEach.asPrice()} each",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -362,7 +475,7 @@ private fun CartLineRow(
         Text(
             quantity.toString(),
             style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(horizontal = 12.dp),
+            modifier = Modifier.padding(horizontal = Spacing.md),
         )
         FilledTonalIconButton(onClick = onIncrement) {
             Icon(Icons.Filled.Add, contentDescription = "Increase")
@@ -378,9 +491,9 @@ private fun CartLineRow(
 }
 
 /**
- * Payment method, shipping and coupon inputs shown under the cart. Everything offered here comes
- * from the connected store's own configuration (synced on product sync), so the section adapts to
- * whichever WooCommerce site the app points at.
+ * Payment method, shipping and coupon inputs. Everything offered here comes from the connected
+ * store's own configuration (synced with the catalog), so the section adapts to whichever
+ * WooCommerce site the app points at.
  */
 @Composable
 private fun CheckoutOptions(
@@ -395,55 +508,52 @@ private fun CheckoutOptions(
     couponCode: String,
     onCouponChange: (String) -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 16.dp, bottom = 12.dp),
-    ) {
-        Text(
-            "Checkout options",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (gateways.isNotEmpty()) {
-            SelectorRow(
-                label = "Payment method",
-                value = selectedGateway?.title ?: "Select…",
-                options = gateways.map { it.title },
-                onSelect = { index -> onSelectGateway(gateways[index]) },
-            )
-        }
-        if (shippingOptions.isNotEmpty()) {
-            SelectorRow(
-                label = "Shipping",
-                value = selectedShipping?.label ?: "None (in person)",
-                options = listOf("None (in person)") + shippingOptions.map { it.label },
-                onSelect = { index ->
-                    onSelectShipping(if (index == 0) null else shippingOptions[index - 1])
-                },
-            )
-            if (selectedShipping != null) {
-                OutlinedTextField(
-                    value = shippingCost,
-                    onValueChange = onShippingCostChange,
-                    label = { Text("Shipping cost") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp, bottom = 8.dp),
+    QuickSaleCard {
+        Column(modifier = Modifier.padding(Spacing.md)) {
+            if (gateways.isNotEmpty()) {
+                SelectorRow(
+                    label = "Payment method",
+                    value = selectedGateway?.title ?: "Select…",
+                    options = gateways.map { it.title },
+                    onSelect = { index -> onSelectGateway(gateways[index]) },
                 )
             }
+            if (shippingOptions.isNotEmpty()) {
+                SelectorRow(
+                    label = "Shipping method",
+                    value = selectedShipping?.label ?: "None (in person)",
+                    options = listOf("None (in person)") + shippingOptions.map { it.label },
+                    onSelect = { index ->
+                        onSelectShipping(if (index == 0) null else shippingOptions[index - 1])
+                    },
+                )
+                AnimatedVisibility(
+                    visible = selectedShipping != null,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
+                ) {
+                    OutlinedTextField(
+                        value = shippingCost,
+                        onValueChange = onShippingCostChange,
+                        label = { Text("Shipping cost") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = Spacing.xs, bottom = Spacing.sm),
+                    )
+                }
+            }
+            OutlinedTextField(
+                value = couponCode,
+                onValueChange = onCouponChange,
+                label = { Text("Coupon code (optional)") },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = Spacing.xs),
+            )
         }
-        OutlinedTextField(
-            value = couponCode,
-            onValueChange = onCouponChange,
-            label = { Text("Coupon code (optional)") },
-            singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 4.dp),
-        )
     }
 }
 
@@ -460,9 +570,8 @@ private fun SelectorRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
                 .clickable(enabled = options.isNotEmpty()) { expanded = true }
-                .padding(vertical = 10.dp, horizontal = 4.dp),
+                .padding(vertical = Spacing.md, horizontal = Spacing.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -495,7 +604,7 @@ private fun SummaryRow(label: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 4.dp),
+            .padding(bottom = Spacing.xs),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(
@@ -512,7 +621,7 @@ private fun ScanEmptyState() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(Spacing.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -525,13 +634,13 @@ private fun ScanEmptyState() {
         Text(
             text = "Scan to add products",
             style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(top = 16.dp),
+            modifier = Modifier.padding(top = Spacing.lg),
         )
         Text(
             text = "Point the scanner at a barcode to add it, or search above. Scanning the same item again increases its quantity.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp),
+            modifier = Modifier.padding(top = Spacing.sm),
         )
     }
 }

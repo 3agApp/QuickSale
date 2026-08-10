@@ -19,12 +19,17 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import me.sourov.quicksale.data.local.Customer
-import me.sourov.quicksale.data.local.CustomerRepository
+import me.sourov.quicksale.data.local.Member
+import me.sourov.quicksale.data.local.OrgLocation
+import me.sourov.quicksale.data.local.Organization
+import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.ProductRepository
 import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.data.scanner.ScannerHub
+import me.sourov.quicksale.data.settings.AddressField
+import me.sourov.quicksale.data.settings.AddressFormRepository
+import me.sourov.quicksale.data.settings.AddressForms
 import me.sourov.quicksale.data.settings.CheckoutConfig
 import me.sourov.quicksale.data.settings.CheckoutConfigRepository
 import me.sourov.quicksale.data.settings.OrderSettingsRepository
@@ -39,6 +44,16 @@ data class CartLine(val product: Product, val quantity: Int) {
     /** Line subtotal as a [BigDecimal]; treats an unparsable price as zero. */
     val lineTotal: BigDecimal
         get() = (product.price.toBigDecimalOrNull() ?: BigDecimal.ZERO) * quantity.toBigDecimal()
+}
+
+/**
+ * Where this order is going. Mirrors what the store accepts: a saved location resolved by ID, a
+ * typed one-off address, or nothing at all for a walk-out sale.
+ */
+sealed interface DeliveryChoice {
+    data object None : DeliveryChoice
+    data class AtLocation(val locationId: Long) : DeliveryChoice
+    data object OneOffAddress : DeliveryChoice
 }
 
 /**
@@ -57,7 +72,7 @@ data class TotalsPreview(
     val total: BigDecimal = BigDecimal.ZERO,
 )
 
-/** Outcome of placing an order: the store's order id plus the totals it calculated. */
+/** Outcome of placing an order: the store's order id plus the totals and stamps it returned. */
 sealed interface PlaceResult {
     data class Placed(
         val remoteId: Long,
@@ -65,23 +80,47 @@ sealed interface PlaceResult {
         val totalTax: String,
         val shippingTotal: String,
         val discountTotal: String,
+        val organizationName: String,
+        val locationName: String,
     ) : PlaceResult
 }
 
+/**
+ * Why the Place order button is unavailable, or null when it isn't. [fatal] marks the reasons no
+ * amount of tapping around fixes — the member or the organization simply may not buy.
+ */
+data class PlaceBlocker(val reason: String, val fatal: Boolean)
+
 class NewOrderViewModel(
-    private val customerId: Long,
-    customerRepository: CustomerRepository,
+    private val organizationId: Long,
+    private val memberUserId: Long,
+    organizationRepository: OrganizationRepository,
     private val productRepository: ProductRepository,
     private val settingsRepository: SettingsRepository,
     private val orderSettingsRepository: OrderSettingsRepository,
     checkoutConfigRepository: CheckoutConfigRepository,
+    addressFormRepository: AddressFormRepository,
 ) : ViewModel() {
 
-    val customer: StateFlow<Customer?> = customerRepository.customer(customerId)
+    val organization: StateFlow<Organization?> = organizationRepository.organization(organizationId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val member: StateFlow<Member?> = organizationRepository.member(organizationId, memberUserId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Only the locations this member is allowed to choose, default first. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val locations: StateFlow<List<OrgLocation>> = member
+        .flatMapLatest { current ->
+            if (current == null) flowOf(emptyList()) else organizationRepository.locationsFor(current)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val checkout: StateFlow<CheckoutConfig> = checkoutConfigRepository.config
         .stateIn(viewModelScope, SharingStarted.Eagerly, CheckoutConfig())
+
+    val addressForms: StateFlow<AddressForms> = addressFormRepository.forms
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AddressForms())
 
     private val _lines = MutableStateFlow<List<CartLine>>(emptyList())
     val lines: StateFlow<List<CartLine>> = _lines.asStateFlow()
@@ -89,6 +128,15 @@ class NewOrderViewModel(
     val itemCount: StateFlow<Int> = _lines
         .map { lines -> lines.sumOf { it.quantity } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    private val _delivery = MutableStateFlow<DeliveryChoice>(DeliveryChoice.None)
+    val delivery: StateFlow<DeliveryChoice> = _delivery.asStateFlow()
+
+    private val _oneOffCountry = MutableStateFlow("")
+    val oneOffCountry: StateFlow<String> = _oneOffCountry.asStateFlow()
+
+    private val _oneOffValues = MutableStateFlow<Map<String, String>>(emptyMap())
+    val oneOffValues: StateFlow<Map<String, String>> = _oneOffValues.asStateFlow()
 
     /** The operator's explicit gateway pick; null falls back to the store's first gateway. */
     private val _gatewayChoice = MutableStateFlow<PaymentGateway?>(null)
@@ -111,6 +159,54 @@ class NewOrderViewModel(
             previewTotals(lines, shipping, cost, config)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, TotalsPreview())
 
+    /** The visible fields of the one-off form for the chosen country, in WooCommerce's order. */
+    val oneOffFields: StateFlow<List<AddressField>> =
+        combine(addressForms, _oneOffCountry) { forms, country ->
+            forms.fieldsFor(country.ifBlank { forms.defaultCountry })
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Required one-off fields still empty, by label. Client-side validation stops here
+     * deliberately: the store validates every one-off address with its own per-country rules —
+     * postcode format, states from the country's list — and its answers are the authoritative ones.
+     */
+    val missingOneOffFields: StateFlow<List<String>> =
+        combine(oneOffFields, _oneOffValues, _delivery) { fields, values, delivery ->
+            if (delivery !is DeliveryChoice.OneOffAddress) {
+                emptyList()
+            } else {
+                fields.filter { it.required && values[it.name].orEmpty().isBlank() }.map { it.label }
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Who this order is for and what's in it — grouped so [blocker] stays a typed combine. */
+    private data class Buyer(
+        val organization: Organization?,
+        val member: Member?,
+        val lines: List<CartLine>,
+    )
+
+    private val buyer = combine(organization, member, _lines, ::Buyer)
+
+    /** Why the order can't be placed yet, or null when it can. */
+    val blocker: StateFlow<PlaceBlocker?> = combine(
+        buyer,
+        _delivery,
+        _shippingChoice,
+        missingOneOffFields,
+        oneOffFields,
+    ) { who, delivery, shipping, missing, fields ->
+        placeBlocker(
+            organization = who.organization,
+            member = who.member,
+            lines = who.lines,
+            delivery = delivery,
+            shipping = shipping,
+            missingFields = missing,
+            oneOffFieldCount = fields.size,
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
@@ -121,6 +217,9 @@ class NewOrderViewModel(
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
+
+    private val _error = MutableStateFlow<OrderError?>(null)
+    val error: StateFlow<OrderError?> = _error.asStateFlow()
 
     private val _placing = MutableStateFlow(false)
     val placing: StateFlow<Boolean> = _placing.asStateFlow()
@@ -134,11 +233,38 @@ class NewOrderViewModel(
         viewModelScope.launch {
             ScannerHub.scans.collect { code -> handleCode(code.trim()) }
         }
+        // Preselect the member's default location so the common case needs no taps.
+        viewModelScope.launch {
+            val available = locations.first { it.isNotEmpty() }
+            if (_delivery.value is DeliveryChoice.None) {
+                val preferred = available.firstOrNull { it.isDefault } ?: available.first()
+                _delivery.value = DeliveryChoice.AtLocation(preferred.id)
+            }
+        }
+        // Start the one-off form on the shop's own base country.
+        viewModelScope.launch {
+            val forms = addressForms.first { !it.isEmpty }
+            if (_oneOffCountry.value.isBlank()) selectOneOffCountry(forms.defaultCountry)
+        }
     }
 
     fun onQueryChange(value: String) { _query.value = value }
 
     fun selectGateway(gateway: PaymentGateway) { _gatewayChoice.value = gateway }
+
+    fun selectDelivery(choice: DeliveryChoice) { _delivery.value = choice }
+
+    fun selectOneOffCountry(code: String) {
+        _oneOffCountry.value = code
+        // Field definitions differ per country, so values whose field no longer exists are dropped
+        // rather than posted under a name this country's form never had.
+        val allowed = addressForms.value.fieldsFor(code).map { it.name }.toSet()
+        _oneOffValues.value = _oneOffValues.value.filterKeys { it in allowed } + ("country" to code)
+    }
+
+    fun setOneOffField(name: String, value: String) {
+        _oneOffValues.value = _oneOffValues.value + (name to value)
+    }
 
     /** Picks a shipping method (or null for no shipping) and pre-fills its configured cost. */
     fun selectShipping(option: ShippingOption?) {
@@ -213,16 +339,13 @@ class NewOrderViewModel(
 
     fun placeOrder() {
         if (_placing.value) return
-        val customer = customer.value
+        blocker.value?.let {
+            _message.value = it.reason
+            return
+        }
+        val member = member.value ?: return
         val current = _lines.value
-        if (customer == null) {
-            _message.value = "Customer not loaded yet"
-            return
-        }
-        if (current.isEmpty()) {
-            _message.value = "Add at least one product"
-            return
-        }
+        if (current.isEmpty()) return
 
         _placing.value = true
         viewModelScope.launch {
@@ -237,13 +360,13 @@ class NewOrderViewModel(
                 try {
                     val api = WooCommerceApi(settings)
                     val order = api.createOrder(
-                        customerId = customer.id,
+                        // The member's WordPress user id is what makes this the member's order.
+                        customerId = member.userId,
                         lineItems = current.map { WooCommerceApi.LineItem(it.product.id, it.quantity) },
                         status = status.slug,
                         setPaid = status.setPaid,
+                        destination = destination(),
                         paymentMethod = selectedGateway.value,
-                        billingJson = customer.billingJson,
-                        shippingJson = customer.shippingJson,
                         shipping = shippingSelection(config),
                         couponCode = _couponCode.value,
                     )
@@ -254,14 +377,80 @@ class NewOrderViewModel(
                         totalTax = order.totalTax,
                         shippingTotal = order.shippingTotal,
                         discountTotal = order.discountTotal,
+                        organizationName = order.organizationName
+                            .ifBlank { organization.value?.name.orEmpty() },
+                        locationName = order.locationName.ifBlank { chosenLocationName() },
                     )
                 } catch (e: Exception) {
-                    _message.value = "Couldn't place order: ${e.message}"
+                    _error.value = OrderError.from(e)
                 }
             } finally {
                 _placing.value = false
             }
         }
+    }
+
+    /** Translates the operator's delivery choice into what the order request carries. */
+    private fun destination(): WooCommerceApi.Destination = when (val choice = _delivery.value) {
+        is DeliveryChoice.AtLocation -> WooCommerceApi.Destination.Location(choice.locationId)
+
+        DeliveryChoice.OneOffAddress -> WooCommerceApi.Destination.OneOff(
+            // Only the fields this country's form actually defines, so nothing stray is posted.
+            fields = oneOffFields.value.associate { field ->
+                field.name to _oneOffValues.value[field.name].orEmpty()
+            } + ("country" to currentCountry()),
+        )
+
+        DeliveryChoice.None -> WooCommerceApi.Destination.None
+    }
+
+    private fun currentCountry(): String =
+        _oneOffCountry.value.ifBlank { addressForms.value.defaultCountry }
+
+    private fun chosenLocationName(): String {
+        val choice = _delivery.value as? DeliveryChoice.AtLocation ?: return ""
+        return locations.value.firstOrNull { it.id == choice.locationId }?.name.orEmpty()
+    }
+
+    private fun placeBlocker(
+        organization: Organization?,
+        member: Member?,
+        lines: List<CartLine>,
+        delivery: DeliveryChoice,
+        shipping: ShippingOption?,
+        missingFields: List<String>,
+        oneOffFieldCount: Int,
+    ): PlaceBlocker? {
+        if (organization == null || member == null) return PlaceBlocker("Loading this account…", false)
+        if (!organization.orgStatus.canTrade) {
+            return PlaceBlocker(
+                "${organization.name} is ${organization.orgStatus.label.lowercase()} and can't order",
+                fatal = true,
+            )
+        }
+        // The store's own resolved answer, used as given rather than re-derived from role/status.
+        if (!member.canPlaceOrders) {
+            return PlaceBlocker("${member.name} isn't allowed to place orders", fatal = true)
+        }
+        if (lines.isEmpty()) return PlaceBlocker("Add at least one product", false)
+        // WooCommerce decides an order "needs delivery" from its shipping lines, not its products.
+        if (shipping != null && delivery is DeliveryChoice.None) {
+            return PlaceBlocker("Choose where this order is going", false)
+        }
+        if (delivery is DeliveryChoice.OneOffAddress) {
+            if (!organization.allowCustomShipping) {
+                return PlaceBlocker("${organization.name} only accepts its saved locations", false)
+            }
+            // With no synced form there are no fields to fill, so "nothing missing" would be a
+            // false pass — the request would carry an empty shipping block for the store to reject.
+            if (oneOffFieldCount == 0) {
+                return PlaceBlocker("Sync accounts to enter an address", false)
+            }
+            if (missingFields.isNotEmpty()) {
+                return PlaceBlocker("Fill in ${missingFields.joinToString(", ")}", false)
+            }
+        }
+        return null
     }
 
     /**
@@ -292,6 +481,8 @@ class NewOrderViewModel(
     }
 
     fun consumeMessage() { _message.value = null }
+
+    fun consumeError() { _error.value = null }
 
     private fun previewTotals(
         lines: List<CartLine>,
@@ -329,21 +520,25 @@ class NewOrderViewModel(
 
     companion object {
         fun factory(
-            customerId: Long,
-            customerRepository: CustomerRepository,
+            organizationId: Long,
+            memberUserId: Long,
+            organizationRepository: OrganizationRepository,
             productRepository: ProductRepository,
             settingsRepository: SettingsRepository,
             orderSettingsRepository: OrderSettingsRepository,
             checkoutConfigRepository: CheckoutConfigRepository,
+            addressFormRepository: AddressFormRepository,
         ) = viewModelFactory {
             initializer {
                 NewOrderViewModel(
-                    customerId = customerId,
-                    customerRepository = customerRepository,
+                    organizationId = organizationId,
+                    memberUserId = memberUserId,
+                    organizationRepository = organizationRepository,
                     productRepository = productRepository,
                     settingsRepository = settingsRepository,
                     orderSettingsRepository = orderSettingsRepository,
                     checkoutConfigRepository = checkoutConfigRepository,
+                    addressFormRepository = addressFormRepository,
                 )
             }
         }

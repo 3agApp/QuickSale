@@ -11,18 +11,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
-import me.sourov.quicksale.data.scanner.ScannerConfigRepository
 import me.sourov.quicksale.data.scanner.ScannerHub
 import me.sourov.quicksale.data.scanner.ScannerMode
-import me.sourov.quicksale.data.settings.settingsDataStore
+import me.sourov.quicksale.data.sync.AutoSyncScheduler
 import me.sourov.quicksale.ui.QuickSaleApp
 import me.sourov.quicksale.ui.theme.QuickSaleTheme
 
 class MainActivity : ComponentActivity() {
 
-    private val scannerConfigRepository by lazy {
-        ScannerConfigRepository(applicationContext.settingsDataStore)
-    }
+    private val scannerConfigRepository by lazy { appContainer.scannerConfig }
 
     // Keyboard/HID scanner capture for the main window (Dialogs capture in their own window).
     private var keyboardScannerMode = false
@@ -46,6 +43,14 @@ class MainActivity : ComponentActivity() {
                         extraKey = config.extraKey.ifBlank { null },
                     )
                 }
+            }
+        }
+
+        // Keep the store snapshot fresh while the till is open. Scoped to STARTED so it stops
+        // polling the moment the app goes to the background and picks straight back up on return.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                AutoSyncScheduler.run(this@MainActivity)
             }
         }
 

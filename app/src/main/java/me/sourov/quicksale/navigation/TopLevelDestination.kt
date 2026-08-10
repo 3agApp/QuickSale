@@ -1,13 +1,13 @@
 package me.sourov.quicksale.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Inventory2
-import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Business
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Inventory2
-import androidx.compose.material.icons.outlined.People
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -20,6 +20,9 @@ enum class TopLevelDestination(
     val label: String,
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector,
+    /** Whether the top bar offers search on this tab. */
+    val searchable: Boolean = false,
+    val searchPlaceholder: String = "",
 ) {
     HOME(
         route = "home",
@@ -32,12 +35,21 @@ enum class TopLevelDestination(
         label = "Products",
         selectedIcon = Icons.Filled.Inventory2,
         unselectedIcon = Icons.Outlined.Inventory2,
+        searchable = true,
+        searchPlaceholder = "Search products",
     ),
-    CUSTOMERS(
-        route = "customers",
-        label = "Customers",
-        selectedIcon = Icons.Filled.People,
-        unselectedIcon = Icons.Outlined.People,
+
+    /**
+     * The B2B customer list. Labelled "Accounts" rather than "Organizations" because it is a
+     * bottom-bar tab and has to stay short and legible at 11sp.
+     */
+    ORGANIZATIONS(
+        route = "organizations",
+        label = "Accounts",
+        selectedIcon = Icons.Filled.Business,
+        unselectedIcon = Icons.Outlined.Business,
+        searchable = true,
+        searchPlaceholder = "Search organizations",
     ),
     SETTINGS(
         route = "settings",

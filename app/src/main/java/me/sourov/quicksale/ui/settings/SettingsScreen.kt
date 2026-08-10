@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -21,9 +22,8 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -44,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -54,13 +55,16 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import me.sourov.quicksale.data.scanner.ScannerConfigRepository
-import me.sourov.quicksale.data.settings.LabelSettingsRepository
-import me.sourov.quicksale.data.settings.OrderSettingsRepository
-import me.sourov.quicksale.data.settings.SettingsRepository
+import me.sourov.quicksale.appContainer
+import me.sourov.quicksale.data.settings.HTTPS_SITE_URL_PREFIX
 import me.sourov.quicksale.data.settings.hasHttpsSiteUrlHost
 import me.sourov.quicksale.data.settings.settingsDataStore
-import me.sourov.quicksale.data.update.AppUpdatePreferences
+import me.sourov.quicksale.data.sync.SyncEtagRepository
+import me.sourov.quicksale.data.sync.SyncManager
+import me.sourov.quicksale.ui.components.QuickSaleCard
+import me.sourov.quicksale.ui.components.SectionHeader
+import me.sourov.quicksale.ui.theme.Sizes
+import me.sourov.quicksale.ui.theme.Spacing
 import me.sourov.quicksale.ui.update.AppUpdateSettingsSection
 import me.sourov.quicksale.ui.update.AppUpdateViewModel
 
@@ -70,33 +74,27 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val repository = remember { SettingsRepository(context.applicationContext.settingsDataStore) }
-    val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(repository))
+    val container = remember(context) { context.appContainer }
+
+    val viewModel: SettingsViewModel = viewModel(
+        factory = SettingsViewModel.factory(
+            repository = container.settings,
+            onStoreChanged = {
+                SyncEtagRepository(context.applicationContext.settingsDataStore).clear()
+                SyncManager.syncAll(context)
+            },
+        ),
+    )
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    val scannerRepository = remember {
-        ScannerConfigRepository(context.applicationContext.settingsDataStore)
-    }
     val scannerViewModel: ScannerViewModel =
-        viewModel(factory = ScannerViewModel.factory(scannerRepository))
-
-    val orderSettingsRepository = remember {
-        OrderSettingsRepository(context.applicationContext.settingsDataStore)
-    }
+        viewModel(factory = ScannerViewModel.factory(container.scannerConfig))
     val orderSettingsViewModel: OrderSettingsViewModel =
-        viewModel(factory = OrderSettingsViewModel.factory(orderSettingsRepository))
-
-    val labelSettingsRepository = remember {
-        LabelSettingsRepository(context.applicationContext.settingsDataStore)
-    }
+        viewModel(factory = OrderSettingsViewModel.factory(container.orderSettings))
     val labelSettingsViewModel: LabelSettingsViewModel =
-        viewModel(factory = LabelSettingsViewModel.factory(labelSettingsRepository))
-
-    val updatePreferences = remember {
-        AppUpdatePreferences(context.applicationContext.settingsDataStore)
-    }
+        viewModel(factory = LabelSettingsViewModel.factory(container.labelSettings))
     val updateViewModel: AppUpdateViewModel =
-        viewModel(factory = AppUpdateViewModel.factory(updatePreferences))
+        viewModel(factory = AppUpdateViewModel.factory(container.updatePreferences))
 
     LaunchedEffect(Unit) {
         viewModel.messages.collect { message -> snackbarHostState.showSnackbar(message) }
@@ -120,40 +118,35 @@ fun SettingsScreen(
         modifier = modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(Spacing.screen),
     ) {
-        Text(
-            text = "Store settings",
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "Connect QuickSale to your WooCommerce store.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        SectionHeader(
+            title = "Store connection",
+            subtitle = "Connect QuickSale to your WooCommerce store",
         )
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(Spacing.sectionGap))
         ConnectionStatusCard(
             isConfigured = state.saved.isConfigured,
             siteUrl = state.saved.siteUrl,
         )
 
-        Spacer(Modifier.height(20.dp))
-        val isIncompleteUrl = !hasHttpsSiteUrlHost(state.siteUrl)
+        Spacer(Modifier.height(Spacing.lg))
+        val isIncompleteUrl = !hasHttpsSiteUrlHost(state.siteHost)
         OutlinedTextField(
-            value = state.siteUrl,
+            value = state.siteHost,
             onValueChange = viewModel::onSiteUrlChange,
             label = { Text("Site URL") },
-            placeholder = { Text("https://yourstore.com") },
+            placeholder = { Text("yourstore.com") },
+            // The scheme is an adornment, not editable text: QuickSale only talks HTTPS, and a
+            // prefix the operator can backspace into is a prefix they can corrupt.
+            prefix = { Text(HTTPS_SITE_URL_PREFIX) },
             leadingIcon = { Icon(Icons.Outlined.Language, contentDescription = null) },
             singleLine = true,
-            isError = false,
             supportingText = if (isIncompleteUrl) {
                 {
                     Text(
-                        text = "Enter your store domain after https://.",
+                        text = "Enter your store's domain, e.g. yourstore.com",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -165,19 +158,20 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(Spacing.lg))
         Text(
             text = "API keys",
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(Spacing.xs))
         Text(
-            text = "Create them in WooCommerce → Settings → Advanced → REST API.",
+            text = "Create them in WooCommerce → Settings → Advanced → REST API. The key's user " +
+                "needs the manage_woocommerce capability to read organizations.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(Spacing.md))
 
         if (!state.showCredentialFields) {
             CredentialEntryChooser(
@@ -190,11 +184,11 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
+                Spacer(Modifier.size(Spacing.sm))
                 Text("Scan QR code")
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(Spacing.md))
             OutlinedTextField(
                 value = state.consumerKey,
                 onValueChange = viewModel::onConsumerKeyChange,
@@ -206,7 +200,7 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(Spacing.md))
             OutlinedTextField(
                 value = state.consumerSecret,
                 onValueChange = viewModel::onConsumerSecretChange,
@@ -236,7 +230,7 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(Spacing.lg))
             OutlinedButton(
                 onClick = viewModel::testConnection,
                 enabled = state.canTest,
@@ -246,7 +240,7 @@ fun SettingsScreen(
             ) {
                 if (state.connectionTest is ConnectionTestState.Testing) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.size(10.dp))
+                    Spacer(Modifier.size(Spacing.sm))
                     Text("Testing…")
                 } else {
                     Text("Test connection")
@@ -256,13 +250,13 @@ fun SettingsScreen(
             ConnectionTestResult(state.connectionTest)
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(Spacing.xl))
         Button(
             onClick = viewModel::save,
             enabled = state.canSave,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp),
+                .height(Sizes.button),
         ) {
             if (state.isSaving) {
                 CircularProgressIndicator(
@@ -275,25 +269,22 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(Modifier.height(28.dp))
-        HorizontalDivider()
-        Spacer(Modifier.height(20.dp))
+        SettingsSectionSpacer()
+        SyncSettingsSection()
+
+        SettingsSectionSpacer()
         OrderSettingsSection(viewModel = orderSettingsViewModel)
 
-        Spacer(Modifier.height(28.dp))
-        HorizontalDivider()
-        Spacer(Modifier.height(20.dp))
+        SettingsSectionSpacer()
         LabelSettingsSection(viewModel = labelSettingsViewModel)
 
-        Spacer(Modifier.height(28.dp))
-        HorizontalDivider()
-        Spacer(Modifier.height(20.dp))
+        SettingsSectionSpacer()
         ScannerSettingsSection(viewModel = scannerViewModel)
 
-        Spacer(Modifier.height(28.dp))
-        HorizontalDivider()
-        Spacer(Modifier.height(20.dp))
+        SettingsSectionSpacer()
         AppUpdateSettingsSection(viewModel = updateViewModel)
+
+        Spacer(Modifier.height(Spacing.xl))
     }
 
     if (showScanDialog) {
@@ -308,29 +299,32 @@ fun SettingsScreen(
     }
 }
 
+/** The rule + breathing room between two settings sections. */
+@Composable
+private fun SettingsSectionSpacer() {
+    Spacer(Modifier.height(Spacing.sectionSpacing))
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+    Spacer(Modifier.height(Spacing.xl))
+}
+
 @Composable
 private fun CredentialEntryChooser(
     onScan: () -> Unit,
     onManual: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    ) {
-        Column(Modifier.padding(20.dp)) {
+    QuickSaleCard {
+        Column(Modifier.padding(Spacing.lg)) {
             Button(
                 onClick = onScan,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp),
+                    .height(Sizes.button),
             ) {
                 Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
-                Spacer(Modifier.size(10.dp))
+                Spacer(Modifier.size(Spacing.sm))
                 Text("Scan QR code")
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(Spacing.sm))
             TextButton(
                 onClick = onManual,
                 modifier = Modifier.fillMaxWidth(),
@@ -341,6 +335,11 @@ private fun CredentialEntryChooser(
     }
 }
 
+/**
+ * The outcome of a connection test. A partial result is its own state: the keys work, but the
+ * organization routes didn't answer — which is a plugin problem, not a credentials problem, and
+ * saying so saves the operator from re-typing keys that were fine.
+ */
 @Composable
 private fun ConnectionTestResult(state: ConnectionTestState) {
     val (icon, tint, message) = when (state) {
@@ -349,17 +348,25 @@ private fun ConnectionTestResult(state: ConnectionTestState) {
             MaterialTheme.colorScheme.tertiary,
             state.message,
         )
+
+        is ConnectionTestState.Partial -> Triple(
+            Icons.Outlined.WarningAmber,
+            MaterialTheme.colorScheme.secondary,
+            state.message,
+        )
+
         is ConnectionTestState.Failure -> Triple(
             Icons.Outlined.ErrorOutline,
             MaterialTheme.colorScheme.error,
             state.message,
         )
+
         else -> return
     }
-    Spacer(Modifier.height(10.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Spacer(Modifier.height(Spacing.md))
+    Row(verticalAlignment = Alignment.Top) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.size(8.dp))
+        Spacer(Modifier.width(Spacing.sm))
         Text(text = message, style = MaterialTheme.typography.bodySmall, color = tint)
     }
 }
@@ -375,20 +382,17 @@ private fun ConnectionStatusCard(
         MaterialTheme.colorScheme.surfaceContainer
     }
     val icon = if (isConfigured) Icons.Filled.CheckCircle else Icons.Outlined.Info
-    val iconTint = if (isConfigured) {
-        MaterialTheme.colorScheme.tertiary
+    val iconTint: Color = if (isConfigured) {
+        MaterialTheme.colorScheme.onTertiaryContainer
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = containerColor),
-    ) {
+    QuickSaleCard(containerColor = containerColor) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(Spacing.lg),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
         ) {
             Icon(
                 imageVector = icon,
@@ -400,12 +404,20 @@ private fun ConnectionStatusCard(
                 Text(
                     text = if (isConfigured) "Store connected" else "Not connected",
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = if (isConfigured) {
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
                 )
                 Text(
                     text = if (isConfigured) siteUrl else "Add your store URL and API keys below.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isConfigured) {
+                        MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
         }

@@ -86,6 +86,7 @@ fun QuickSaleTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,
-        content = content
+        shapes = QuickSaleShapes,
+        content = content,
     )
 }

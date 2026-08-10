@@ -22,6 +22,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 
+/**
+ * The app bar for every top-level tab.
+ *
+ * It has two faces: the brand lockup with actions, and a full-width search field. [onSync], when
+ * supplied, puts that tab's sync one tap from whatever the operator is looking at.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuickSaleTopBar(
@@ -35,6 +41,8 @@ fun QuickSaleTopBar(
     onQueryChange: (String) -> Unit,
     onSearchOpen: () -> Unit,
     onSearchClose: () -> Unit,
+    onSync: (() -> Unit)? = null,
+    syncing: Boolean = false,
 ) {
     val colors = TopAppBarDefaults.topAppBarColors(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -90,6 +98,7 @@ fun QuickSaleTopBar(
             },
             title = { QuickSaleBrandLockup() },
             actions = {
+                onSync?.let { SyncIconButton(syncing = syncing, onClick = it) }
                 if (searchEnabled) {
                     IconButton(onClick = onSearchOpen) {
                         Icon(Icons.Outlined.Search, contentDescription = "Search")

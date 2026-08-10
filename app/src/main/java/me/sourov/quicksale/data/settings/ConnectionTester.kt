@@ -2,53 +2,70 @@ package me.sourov.quicksale.data.settings
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
+import me.sourov.quicksale.data.remote.WooApiException
+import me.sourov.quicksale.data.remote.WooHttp
 
 sealed interface ConnectionResult {
     data class Success(val message: String) : ConnectionResult
+
+    /** Reached and authenticated, but the organization plugin's routes aren't there. */
+    data class Partial(val message: String) : ConnectionResult
     data class Failure(val message: String) : ConnectionResult
 }
 
 /**
- * Performs a lightweight, real request against the WooCommerce REST API to confirm the
- * store URL and keys work. Uses query-string auth (the broadly compatible option over HTTPS).
+ * Performs real requests against the store to confirm the URL and keys work.
+ *
+ * Two checks, because a B2B till needs both: WooCommerce itself, and the organization-accounts
+ * routes the app now depends on. A store that answers the first but not the second is reported
+ * separately — the keys are fine, the plugin is the problem, and that is a different fix.
  */
 class ConnectionTester {
 
     suspend fun test(settings: StoreSettings): ConnectionResult = withContext(Dispatchers.IO) {
-        val base = normalizeHttpsSiteUrl(settings.siteUrl)
-            ?: return@withContext ConnectionResult.Failure("Enter a valid store URL")
+        if (normalizeHttpsSiteUrl(settings.siteUrl) == null) {
+            return@withContext ConnectionResult.Failure("Enter a valid store URL")
+        }
         if (settings.consumerKey.isBlank() || settings.consumerSecret.isBlank()) {
             return@withContext ConnectionResult.Failure("Enter both the consumer key and secret")
         }
 
-        val ck = URLEncoder.encode(settings.consumerKey.trim(), "UTF-8")
-        val cs = URLEncoder.encode(settings.consumerSecret.trim(), "UTF-8")
-        val endpoint = "$base/wp-json/wc/v3/products?per_page=1&consumer_key=$ck&consumer_secret=$cs"
+        val http = WooHttp(settings)
 
-        var connection: HttpURLConnection? = null
         try {
-            connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 12_000
-                readTimeout = 12_000
-                instanceFollowRedirects = true
-                setRequestProperty("Accept", "application/json")
-            }
-            when (val code = connection.responseCode) {
-                in 200..299 -> ConnectionResult.Success("Connected to your store successfully")
-                401, 403 -> ConnectionResult.Failure("Keys rejected (HTTP $code) — check the consumer key and secret")
-                404 -> ConnectionResult.Failure("WooCommerce API not found (404) — check the site URL")
-                in 500..599 -> ConnectionResult.Failure("Store error (HTTP $code) — try again shortly")
-                else -> ConnectionResult.Failure("Unexpected response (HTTP $code)")
-            }
+            http.get("wc/v3/products", mapOf("per_page" to "1"))
+        } catch (e: WooApiException) {
+            return@withContext ConnectionResult.Failure(wooFailure(e))
         } catch (e: Exception) {
-            ConnectionResult.Failure(e.message ?: "Could not reach the store")
-        } finally {
-            connection?.disconnect()
+            return@withContext ConnectionResult.Failure(e.message ?: "Could not reach the store")
+        }
+
+        try {
+            http.get("wc-woap/v1/organizations", mapOf("per_page" to "1"))
+            ConnectionResult.Success("Connected — WooCommerce and organization accounts both responded")
+        } catch (e: WooApiException) {
+            ConnectionResult.Partial(
+                when (e.status) {
+                    404 -> "WooCommerce is connected, but the organization accounts plugin isn't " +
+                        "responding — check it's installed and active on the store"
+
+                    401, 403 -> "WooCommerce is connected, but these keys can't read organizations " +
+                        "— the key's user needs the manage_woocommerce capability"
+
+                    else -> "WooCommerce is connected, but organizations failed: ${e.message}"
+                }
+            )
+        } catch (e: Exception) {
+            ConnectionResult.Partial(
+                "WooCommerce is connected, but organizations couldn't be reached: ${e.message}"
+            )
         }
     }
 
+    private fun wooFailure(e: WooApiException): String = when (e.status) {
+        401, 403 -> "Keys rejected (HTTP ${e.status}) — check the consumer key and secret"
+        404 -> "WooCommerce API not found (404) — check the site URL"
+        in 500..599 -> "Store error (HTTP ${e.status}) — try again shortly"
+        else -> e.message
+    }
 }

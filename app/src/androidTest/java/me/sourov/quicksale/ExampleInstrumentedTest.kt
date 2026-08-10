@@ -17,8 +17,9 @@ import org.junit.Assert.*
 class ExampleInstrumentedTest {
     @Test
     fun useAppContext() {
-        // Context of the app under test.
+        // Context of the app under test. Debug builds carry an applicationIdSuffix so they can be
+        // installed next to a release build, so match the base id rather than the exact one.
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("me.sourov.quicksale", appContext.packageName)
+        assertTrue(appContext.packageName.startsWith("me.sourov.quicksale"))
     }
 }
