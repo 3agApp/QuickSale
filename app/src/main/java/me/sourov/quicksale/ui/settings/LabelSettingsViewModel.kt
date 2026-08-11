@@ -24,6 +24,7 @@ class LabelSettingsViewModel(
     fun setShowBarcode(value: Boolean) = persist { repository.setShowBarcode(value) }
     fun setShowEanNumber(value: Boolean) = persist { repository.setShowEanNumber(value) }
     fun setShowSku(value: Boolean) = persist { repository.setShowSku(value) }
+    fun setShowPackSize(value: Boolean) = persist { repository.setShowPackSize(value) }
     fun setShowPrice(value: Boolean) = persist { repository.setShowPrice(value) }
     fun setShowMsrp(value: Boolean) = persist { repository.setShowMsrp(value) }
     fun setMedia(value: LabelMedia) = persist { repository.setMedia(value) }

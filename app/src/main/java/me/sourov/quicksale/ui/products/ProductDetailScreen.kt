@@ -1,9 +1,11 @@
 package me.sourov.quicksale.ui.products
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -37,11 +39,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,10 +56,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.ProductRepository
 import me.sourov.quicksale.data.local.QuickSaleDatabase
 import me.sourov.quicksale.data.settings.LabelSettingsRepository
@@ -155,6 +161,13 @@ fun ProductDetailScreen(
             DetailRow(label = "EAN", value = current.ean)
         }
 
+        // Only worth a row when the store actually restricts the quantity — every other product
+        // is simply sold one at a time, which is what an absent row says.
+        if (current.minOrderQuantity > 1 || current.orderQuantityStep > 1) {
+            Spacer(Modifier.height(8.dp))
+            DetailRow(label = "Pack (VE)", value = packSizeSummary(current))
+        }
+
         if (current.categoryList.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
             Text(
@@ -181,11 +194,7 @@ fun ProductDetailScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(6.dp))
-            Text(
-                text = current.description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            ExpandableDescription(current.description)
         }
 
         Spacer(Modifier.height(28.dp))
@@ -355,6 +364,55 @@ private fun StepperRow(
         }
     }
 }
+
+/**
+ * How the store sells this product, in the two numbers the order screen enforces: the smallest
+ * quantity it will take, and how quantities grow above it when the two differ.
+ */
+private fun packSizeSummary(product: Product): String {
+    val min = product.minOrderQuantity.coerceAtLeast(1)
+    val step = product.orderQuantityStep.coerceAtLeast(1)
+    return if (step == min) "$min" else "$min, then +$step"
+}
+
+/**
+ * A product description, cut to [COLLAPSED_DESCRIPTION_LINES] with a *Show more* button when it
+ * runs longer than that.
+ *
+ * Wholesale descriptions are routinely a wall of care instructions and packaging notes, and left
+ * whole they push the print button — the reason anyone opens this screen — a screenful or two down.
+ * The button only appears when the text is actually cut off, so a two-line description keeps its
+ * old shape; whether it is cut off is what the layout itself reports, not a guess from the
+ * character count, so it stays right at any font scale or screen width.
+ */
+@Composable
+private fun ExpandableDescription(description: String) {
+    var expanded by rememberSaveable(description) { mutableStateOf(false) }
+    var truncated by remember(description) { mutableStateOf(false) }
+
+    Text(
+        text = description,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        maxLines = if (expanded) Int.MAX_VALUE else COLLAPSED_DESCRIPTION_LINES,
+        overflow = TextOverflow.Ellipsis,
+        // Only meaningful while collapsed: expanded text never overflows, and reading it back then
+        // would retract the button that got the reader here.
+        onTextLayout = { layout -> if (!expanded) truncated = layout.hasVisualOverflow },
+        modifier = Modifier.animateContentSize(),
+    )
+    if (truncated) {
+        TextButton(
+            onClick = { expanded = !expanded },
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+            modifier = Modifier.padding(top = 2.dp),
+        ) {
+            Text(if (expanded) "Show less" else "Show more")
+        }
+    }
+}
+
+private const val COLLAPSED_DESCRIPTION_LINES = 4
 
 @Composable
 private fun DetailImage(imageUrl: String?, onClick: () -> Unit) {

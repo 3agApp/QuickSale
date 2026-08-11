@@ -242,7 +242,9 @@ class LabelRendererTest {
         ean: String,
         name: String = "Classic Cotton T-Shirt",
         brand: String = "Northwind",
+        minOrderQuantity: Int = 144,
     ) = Product(
+        minOrderQuantity = minOrderQuantity,
         id = 1,
         name = name,
         brand = brand,

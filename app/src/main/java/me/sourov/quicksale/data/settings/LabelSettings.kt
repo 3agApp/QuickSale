@@ -44,6 +44,12 @@ data class LabelSettings(
     val showEanNumber: Boolean = true,
     /** The SKU as plain text. Printed for the counter to read, never encoded as the barcode. */
     val showSku: Boolean = true,
+    /**
+     * The product's pack size (`min_order_quantity`), printed under the SKU as "VE" — the trade's
+     * own abbreviation for the unit a product is sold in. A product with no pack size prints "VE 1",
+     * which is the true answer rather than a missing line.
+     */
+    val showPackSize: Boolean = true,
     val showPrice: Boolean = true,
     /**
      * The manufacturer's suggested retail price, printed above the selling price. Only stores whose

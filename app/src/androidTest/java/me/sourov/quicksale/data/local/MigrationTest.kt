@@ -144,6 +144,10 @@ class MigrationTest {
                 assertEquals("", product?.ean)
                 // Same for v7's MSRP, which most stores never send at all.
                 assertEquals("", product?.msrp)
+                // v9's pack size defaults to one unit ordered one at a time, so a row that
+                // predates the columns stays orderable in exactly the quantities it always was.
+                assertEquals(1, product?.minOrderQuantity)
+                assertEquals(1, product?.orderQuantityStep)
                 // A blank EAN must not swallow scans — the SKU still resolves the product.
                 assertEquals(1L, dao.findByCode("TSHIRT-001")?.id)
             }
@@ -190,6 +194,8 @@ class MigrationTest {
                 QuickSaleDatabase.MIGRATION_4_5,
                 QuickSaleDatabase.MIGRATION_5_6,
                 QuickSaleDatabase.MIGRATION_6_7,
+                QuickSaleDatabase.MIGRATION_7_8,
+                QuickSaleDatabase.MIGRATION_8_9,
             )
             .build()
 

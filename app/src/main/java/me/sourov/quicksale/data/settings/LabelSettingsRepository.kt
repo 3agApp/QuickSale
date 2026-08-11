@@ -21,6 +21,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
         val SHOW_BARCODE = booleanPreferencesKey("label_show_barcode")
         val SHOW_EAN_NUMBER = booleanPreferencesKey("label_show_ean_number")
         val SHOW_SKU = booleanPreferencesKey("label_show_sku")
+        val SHOW_PACK_SIZE = booleanPreferencesKey("label_show_pack_size")
         val SHOW_PRICE = booleanPreferencesKey("label_show_price")
         val SHOW_MSRP = booleanPreferencesKey("label_show_msrp")
         val MEDIA = stringPreferencesKey("label_media")
@@ -38,6 +39,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
                 showBarcode = prefs[Keys.SHOW_BARCODE] ?: defaults.showBarcode,
                 showEanNumber = prefs[Keys.SHOW_EAN_NUMBER] ?: defaults.showEanNumber,
                 showSku = prefs[Keys.SHOW_SKU] ?: defaults.showSku,
+                showPackSize = prefs[Keys.SHOW_PACK_SIZE] ?: defaults.showPackSize,
                 showPrice = prefs[Keys.SHOW_PRICE] ?: defaults.showPrice,
                 showMsrp = prefs[Keys.SHOW_MSRP] ?: defaults.showMsrp,
                 media = LabelMedia.fromSlug(prefs[Keys.MEDIA]),
@@ -51,6 +53,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
     suspend fun setShowBarcode(value: Boolean) = edit(Keys.SHOW_BARCODE, value)
     suspend fun setShowEanNumber(value: Boolean) = edit(Keys.SHOW_EAN_NUMBER, value)
     suspend fun setShowSku(value: Boolean) = edit(Keys.SHOW_SKU, value)
+    suspend fun setShowPackSize(value: Boolean) = edit(Keys.SHOW_PACK_SIZE, value)
     suspend fun setShowPrice(value: Boolean) = edit(Keys.SHOW_PRICE, value)
     suspend fun setShowMsrp(value: Boolean) = edit(Keys.SHOW_MSRP, value)
     suspend fun setMedia(value: LabelMedia) = edit(Keys.MEDIA, value.slug)

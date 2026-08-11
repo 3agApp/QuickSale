@@ -67,6 +67,7 @@ fun LabelSettingsSection(
         SwitchRow("Product name", settings.showName, viewModel::setShowName)
         SwitchRow("Brand", settings.showBrand, viewModel::setShowBrand)
         SwitchRow("SKU text", settings.showSku, viewModel::setShowSku)
+        SwitchRow("Pack size (VE)", settings.showPackSize, viewModel::setShowPackSize)
         SwitchRow("MSRP (UVP)", settings.showMsrp, viewModel::setShowMsrp)
         SwitchRow("Price (EK)", settings.showPrice, viewModel::setShowPrice)
         SwitchRow("Barcode (EAN)", settings.showBarcode, viewModel::setShowBarcode)

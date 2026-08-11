@@ -72,10 +72,10 @@ fun QuickSaleApp() {
 
     LaunchedEffect(Unit) { updateViewModel.checkOnAppStart() }
 
-    // Mirror the persisted store currency into the formatter so prices show the right symbol;
-    // emits again whenever a sync refreshes the currency, recomposing visible prices.
+    // Mirror the persisted store currency into the formatter so prices are written the way the
+    // website writes them; emits again whenever a sync refreshes it, recomposing visible prices.
     LaunchedEffect(Unit) {
-        container.currency.currency.collect { CurrencyFormatter.update(it.symbol) }
+        container.currency.currency.collect(CurrencyFormatter::update)
     }
 
     // On the Products tab, a hardware/camera scan (broadcast or keyboard, per Settings) becomes

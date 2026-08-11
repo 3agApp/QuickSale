@@ -28,7 +28,6 @@ import me.sourov.quicksale.data.settings.AddressFormRepository
 import me.sourov.quicksale.data.settings.CheckoutConfigRepository
 import me.sourov.quicksale.data.settings.CurrencyRepository
 import me.sourov.quicksale.data.settings.SettingsRepository
-import me.sourov.quicksale.data.settings.StoreCurrency
 import me.sourov.quicksale.data.settings.StoreSettings
 import me.sourov.quicksale.data.settings.settingsDataStore
 import java.io.IOException
@@ -106,12 +105,11 @@ object SyncManager {
         val api = WooCommerceApi(settings)
         val db = QuickSaleDatabase.getInstance(context)
 
-        // Refresh the store currency so prices show the right symbol. Non-fatal: an older store or
-        // missing endpoint must not abort the catalog sync.
+        // Refresh the store currency so prices are written exactly as the website writes them.
+        // Non-fatal: an older store or missing endpoint must not abort the catalog sync.
         runCatching {
             val currency = retryOnNetworkBlip { api.fetchCurrency() }
-            CurrencyRepository(context.settingsDataStore)
-                .setCurrency(StoreCurrency(code = currency.code, symbol = currency.symbol))
+            CurrencyRepository(context.settingsDataStore).setCurrency(currency)
         }
         // Refresh checkout behaviour (payment gateways, shipping methods, tax rules) for the order
         // screen. Also non-fatal for the same reason.

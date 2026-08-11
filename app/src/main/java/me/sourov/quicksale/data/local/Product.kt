@@ -31,6 +31,17 @@ data class Product(
     val imageUrl: String?,
     val categories: String,
     val description: String,
+    /**
+     * The smallest quantity the store sells this product in — its pack size (VE). Always at least
+     * 1: a store that carries no minimum, or sends a zero, means "one unit", which is the same
+     * thing an unrestricted product means.
+     */
+    val minOrderQuantity: Int = 1,
+    /**
+     * How the quantity may grow above [minOrderQuantity] — the case size a reorder comes in.
+     * Always at least 1, so a product with no step still moves one unit at a time.
+     */
+    val orderQuantityStep: Int = 1,
 ) {
     val onSale: Boolean get() = salePrice.isNotBlank() && salePrice != regularPrice
 
@@ -40,4 +51,21 @@ data class Product(
 
     val categoryList: List<String>
         get() = categories.split(",").map { it.trim() }.filter { it.isNotBlank() }
+
+    /**
+     * The largest quantity the store will actually sell at or below [desired], or 0 when [desired]
+     * falls short of the pack size (i.e. the line should go away rather than round up to a
+     * quantity nobody asked for).
+     *
+     * Every orderable quantity is `minOrderQuantity + n × orderQuantityStep`, so this is what turns
+     * a raw +1/−1 intent into a number WooCommerce will accept. Rounding *down* is deliberate: the
+     * operator taps − to sell less, and snapping upward would make the button do the opposite of
+     * what it says.
+     */
+    fun snapOrderQuantity(desired: Int): Int {
+        val min = minOrderQuantity.coerceAtLeast(1)
+        val step = orderQuantityStep.coerceAtLeast(1)
+        if (desired < min) return 0
+        return min + ((desired - min) / step) * step
+    }
 }

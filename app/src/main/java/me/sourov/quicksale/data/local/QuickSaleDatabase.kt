@@ -11,7 +11,7 @@ import me.sourov.quicksale.BuildConfig
 
 @Database(
     entities = [Product::class, Organization::class, Member::class, OrgLocation::class],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class QuickSaleDatabase : RoomDatabase() {
@@ -33,7 +33,7 @@ abstract class QuickSaleDatabase : RoomDatabase() {
                 .addCallback(SeedCallback)
                 .addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
-                    MIGRATION_6_7, MIGRATION_7_8,
+                    MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
                 )
                 .build()
 
@@ -123,6 +123,20 @@ abstract class QuickSaleDatabase : RoomDatabase() {
         }
 
         /**
+         * v9 stores the product's pack size and case step (`min_order_quantity` /
+         * `order_quantity_step`), which the order screen enforces and the label prints as VE.
+         * Existing rows default to 1 — one unit, ordered one at a time — which is what an
+         * unrestricted product means, so nothing changes at the counter until the next sync.
+         */
+        @VisibleForTesting
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE products ADD COLUMN minOrderQuantity INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE products ADD COLUMN orderQuantityStep INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
+        /**
          * The organization tables, copied verbatim from the statements Room generates for a fresh
          * install (`QuickSaleDatabase_Impl.createAllTables`).
          *
@@ -148,14 +162,17 @@ abstract class QuickSaleDatabase : RoomDatabase() {
         }
 
         private val SAMPLE_PRODUCTS = listOf(
-            sampleProduct(1, "Classic Cotton T-Shirt", "Northwind", "TSHIRT-001", "4006381333931", "19.99", "24.99", "19.99", "24.99", "instock", 120, 11, "Apparel,Tops", "Soft 100% cotton tee with a relaxed fit. Pre-shrunk and machine washable."),
-            sampleProduct(2, "Leather Card Wallet", "Lindgren", "WALLET-002", "5901234123457", "39.00", "39.00", "", "", "instock", 34, 22, "Accessories", "Slim full-grain leather wallet that holds up to six cards."),
-            // A title long enough to need the label's name to shrink below its full size.
-            sampleProduct(3, "Stainless Steel Vacuum Insulated Water Bottle 750ml", "Bergen", "BOTTLE-750", "7622210992659", "22.50", "22.50", "", "27.00", "outofstock", 0, 33, "Drinkware", "Double-walled vacuum insulated bottle. Keeps drinks cold 24h."),
-            sampleProduct(4, "Wireless Earbuds Pro", "Acme Audio", "AUDIO-EBP", "0190198001787", "89.00", "109.00", "89.00", "129.00", "instock", 18, 44, "Electronics,Audio", "Active noise cancelling earbuds with 30h total battery life."),
+            // Sold by the six-pack, and reordered six at a time: the pack-size case the order
+            // screen has to snap quantities onto.
+            sampleProduct(1, "Classic Cotton T-Shirt", "Northwind", "TSHIRT-001", "4006381333931", "19.99", "24.99", "19.99", "24.99", "instock", 120, 11, "Apparel,Tops", "Soft 100% cotton tee with a relaxed fit. Pre-shrunk and machine washable.", 6, 6),
+            sampleProduct(2, "Leather Card Wallet", "Lindgren", "WALLET-002", "5901234123457", "39.00", "39.00", "", "", "instock", 34, 22, "Accessories", "Slim full-grain leather wallet that holds up to six cards.", 1, 1),
+            // A title long enough to need the label's name to shrink below its full size, and a
+            // description long enough for the detail screen to collapse behind "Show more".
+            sampleProduct(3, "Stainless Steel Vacuum Insulated Water Bottle 750ml", "Bergen", "BOTTLE-750", "7622210992659", "22.50", "22.50", "", "27.00", "outofstock", 0, 33, "Drinkware", "Double-walled vacuum insulated bottle that keeps drinks cold for 24 hours and hot for 12. The 18/8 stainless steel body will not hold flavours or rust, and the powder-coated finish stays comfortable to hold straight out of the freezer. The wide mouth takes standard ice cubes and opens far enough to clean by hand, and the lid seals against a silicone gasket so it can go in a bag lid-down without leaking. Dishwasher safe on the top rack; hand-washing the lid keeps the gasket supple for longer. Supplied in a recycled card sleeve with no plastic wrap.", 4, 2),
+            sampleProduct(4, "Wireless Earbuds Pro", "Acme Audio", "AUDIO-EBP", "0190198001787", "89.00", "109.00", "89.00", "129.00", "instock", 18, 44, "Electronics,Audio", "Active noise cancelling earbuds with 30h total battery life.", 2, 1),
             // No barcode number on the store: its label falls back to the SKU.
-            sampleProduct(5, "Canvas Tote Bag", "", "BAG-TOTE", "", "14.00", "14.00", "", "", "instock", 75, 55, "Accessories,Bags", "Heavy-duty canvas tote, perfect for groceries or the beach."),
-            sampleProduct(6, "Ceramic Coffee Mug", "", "MUG-CER", "96385074", "11.25", "11.25", "", "", "onbackorder", 0, 66, "Drinkware", "Stoneware mug, 350ml, microwave and dishwasher safe."),
+            sampleProduct(5, "Canvas Tote Bag", "", "BAG-TOTE", "", "14.00", "14.00", "", "", "instock", 75, 55, "Accessories,Bags", "Heavy-duty canvas tote, perfect for groceries or the beach.", 1, 1),
+            sampleProduct(6, "Ceramic Coffee Mug", "", "MUG-CER", "96385074", "11.25", "11.25", "", "", "onbackorder", 0, 66, "Drinkware", "Stoneware mug, 350ml, microwave and dishwasher safe.", 12, 12),
         )
 
         /**
@@ -187,11 +204,12 @@ abstract class QuickSaleDatabase : RoomDatabase() {
             id: Long, name: String, brand: String, sku: String, ean: String, price: String,
             regular: String, sale: String, msrp: String, stockStatus: String, qty: Int,
             imageSeed: Int, categories: String, description: String,
+            minOrderQuantity: Int, orderQuantityStep: Int,
         ): String {
             val image = "https://picsum.photos/seed/$imageSeed/400/400"
             return "INSERT INTO products " +
-                "(id, name, brand, sku, ean, price, regularPrice, salePrice, msrp, stockStatus, stockQuantity, imageUrl, categories, description) VALUES " +
-                "($id, '$name', '$brand', '$sku', '$ean', '$price', '$regular', '$sale', '$msrp', '$stockStatus', $qty, '$image', '$categories', '$description')"
+                "(id, name, brand, sku, ean, price, regularPrice, salePrice, msrp, stockStatus, stockQuantity, imageUrl, categories, description, minOrderQuantity, orderQuantityStep) VALUES " +
+                "($id, '$name', '$brand', '$sku', '$ean', '$price', '$regular', '$sale', '$msrp', '$stockStatus', $qty, '$image', '$categories', '${description.sqlEscaped()}', $minOrderQuantity, $orderQuantityStep)"
         }
 
         private fun sampleOrganization(

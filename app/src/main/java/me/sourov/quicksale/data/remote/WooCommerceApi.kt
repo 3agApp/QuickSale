@@ -2,8 +2,10 @@ package me.sourov.quicksale.data.remote
 
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.settings.CheckoutConfig
+import me.sourov.quicksale.data.settings.CurrencyPosition
 import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.ShippingOption
+import me.sourov.quicksale.data.settings.StoreCurrency
 import me.sourov.quicksale.data.settings.StoreSettings
 import org.json.JSONArray
 import org.json.JSONObject
@@ -37,19 +39,33 @@ class WooCommerceApi(settings: StoreSettings) {
     suspend fun fetchProduct(id: Long): Product =
         JSONObject(http.get("wc/v3/products/$id").body).toProduct()
 
-    /** The store's active display currency. */
-    data class Currency(val code: String, val symbol: String)
-
     /**
-     * Reads the store's current currency from `/wc/v3/data/currencies/current` so prices render
-     * with the right symbol (e.g. £, €, ৳) instead of a hardcoded $.
+     * Reads the store's current currency, and how the store writes prices with it.
+     *
+     * Two routes, because WooCommerce splits the fact: `/wc/v3/data/currencies/current` names the
+     * currency and its symbol, while the separators, decimal count and symbol position live in
+     * `/wc/v3/settings/general` alongside every other shop option. The second read is optional —
+     * a store that refuses it still gets the right symbol, formatted WooCommerce's own defaults.
      */
-    suspend fun fetchCurrency(): Currency {
+    suspend fun fetchCurrency(): StoreCurrency {
         val json = JSONObject(http.get("wc/v3/data/currencies/current").body)
-        return Currency(
+        val base = StoreCurrency(
             code = json.optString("code"),
             // WooCommerce sometimes returns the symbol as an HTML entity (e.g. "&#36;").
-            symbol = json.optString("symbol").decodeHtmlEntities(),
+            symbol = json.optString("symbol").decodeHtmlEntities().ifBlank { StoreCurrency.DEFAULT_SYMBOL },
+        )
+        val general = runCatching { JSONArray(body("wc/v3/settings/general")).settingsMap() }
+            .getOrNull() ?: return base
+        val defaults = StoreCurrency()
+        return base.copy(
+            position = CurrencyPosition.fromSlug(general["woocommerce_currency_pos"]),
+            // Grouping with nothing at all is a setting a store really does choose, so an empty
+            // value is taken at face value; only a key the store never sent falls back.
+            thousandSeparator = general["woocommerce_price_thousand_sep"] ?: defaults.thousandSeparator,
+            decimalSeparator = general["woocommerce_price_decimal_sep"]?.takeIf { it.isNotEmpty() }
+                ?: defaults.decimalSeparator,
+            decimals = general["woocommerce_price_num_decimals"]?.toIntOrNull()
+                ?: defaults.decimals,
         )
     }
 
@@ -291,7 +307,24 @@ class WooCommerceApi(settings: StoreSettings) {
             imageUrl = firstImage,
             categories = categoryNames.joinToString(", "),
             description = optString("short_description").ifBlank { optString("description") }.stripHtml(),
+            minOrderQuantity = readQuantityRule("min_order_quantity"),
+            orderQuantityStep = readQuantityRule("order_quantity_step"),
         )
+    }
+
+    /**
+     * A pack-size rule (`min_order_quantity` / `order_quantity_step`), or 1 when the store has none.
+     *
+     * Like `msrp`, these come from a plugin rather than WooCommerce core, so the key may be missing,
+     * null, empty, or left at a zero the store never cleaned up — and every one of those means the
+     * product has no rule. One is the honest answer for all of them: a product with no minimum is
+     * sold one at a time, which is exactly what a minimum of one says.
+     */
+    private fun JSONObject.readQuantityRule(key: String): Int {
+        val value = opt(key) ?: return 1
+        if (value == JSONObject.NULL) return 1
+        // Stores send these as numbers or as numeric strings; a decimal is floored to whole units.
+        return value.toString().trim().toDoubleOrNull()?.toInt()?.coerceAtLeast(1) ?: 1
     }
 
     /**

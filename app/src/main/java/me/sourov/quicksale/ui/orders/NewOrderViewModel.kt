@@ -44,6 +44,13 @@ data class CartLine(val product: Product, val quantity: Int) {
     /** Line subtotal as a [BigDecimal]; treats an unparsable price as zero. */
     val lineTotal: BigDecimal
         get() = (product.price.toBigDecimalOrNull() ?: BigDecimal.ZERO) * quantity.toBigDecimal()
+
+    /**
+     * This line moved [steps] of the product's order step, snapped onto a quantity the store
+     * actually sells. A result of 0 means the line has fallen below the product's pack size.
+     */
+    fun stepped(steps: Int): CartLine =
+        copy(quantity = product.snapOrderQuantity(quantity + steps * product.orderQuantityStep.coerceAtLeast(1)))
 }
 
 /**
@@ -277,14 +284,22 @@ class NewOrderViewModel(
 
     fun setCouponCode(value: String) { _couponCode.value = value }
 
-    /** Adds a product to the cart, or bumps its quantity if already present. */
+    /**
+     * Adds a product to the cart, or bumps its quantity if already present.
+     *
+     * A first scan rings up the product's pack size rather than a single unit, and a repeat scan
+     * adds another case — so a product the store only sells in sixes never enters the order as a
+     * quantity WooCommerce would refuse.
+     */
     fun addProduct(product: Product) {
         _lines.value = _lines.value.let { current ->
             val index = current.indexOfFirst { it.product.id == product.id }
             if (index >= 0) {
-                current.toMutableList().also { it[index] = it[index].copy(quantity = it[index].quantity + 1) }
+                current.toMutableList().also { lines ->
+                    lines[index] = lines[index].stepped(+1)
+                }
             } else {
-                current + CartLine(product, 1)
+                current + CartLine(product, product.snapOrderQuantity(product.minOrderQuantity))
             }
         }
     }
@@ -322,14 +337,13 @@ class NewOrderViewModel(
     fun increment(productId: Long) = changeQuantity(productId, +1)
     fun decrement(productId: Long) = changeQuantity(productId, -1)
 
-    private fun changeQuantity(productId: Long, delta: Int) {
+    /**
+     * Moves a line by [steps] of the product's own order step, never off it. Dropping below the
+     * product's minimum removes the line rather than leaving a quantity the store won't sell.
+     */
+    private fun changeQuantity(productId: Long, steps: Int) {
         _lines.value = _lines.value.mapNotNull { line ->
-            if (line.product.id != productId) {
-                line
-            } else {
-                val quantity = line.quantity + delta
-                if (quantity <= 0) null else line.copy(quantity = quantity)
-            }
+            if (line.product.id != productId) line else line.stepped(steps).takeIf { it.quantity > 0 }
         }
     }
 

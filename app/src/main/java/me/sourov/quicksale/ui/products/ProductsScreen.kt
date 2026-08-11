@@ -240,7 +240,5 @@ fun StockBadge(product: Product) {
     }
 }
 
-fun String.asPrice(): String {
-    val trimmed = trim()
-    return if (trimmed.isBlank()) "—" else "${CurrencyFormatter.symbol} $trimmed"
-}
+/** A store price string rendered the way the store's own website renders it. */
+fun String.asPrice(): String = CurrencyFormatter.format(this)

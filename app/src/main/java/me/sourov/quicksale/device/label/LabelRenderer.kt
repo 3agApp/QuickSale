@@ -26,7 +26,7 @@ import kotlin.math.roundToInt
  * stock. The same bitmap drives the on-screen preview and the thermal printer, so what you see is
  * what prints. Which fields appear comes from [LabelSettings].
  *
- * The label reads top-down as a wholesaler's shelf label: name, brand, SKU, UVP, EK, then the
+ * The label reads top-down as a wholesaler's shelf label: name, brand, SKU, VE, UVP, EK, then the
  * barcode and its digits. Everything above the barcode is one tight left-aligned block — the eye
  * runs down a single edge instead of hunting for the start of each centred line — and only the
  * barcode and its number are centred, since a scanner is aimed at the middle of the label.
@@ -36,7 +36,7 @@ import kotlin.math.roundToInt
  * hand-written note.
  *
  * The barcode *is* the product's EAN — the SKU is never encoded, only printed as text — and the
- * prices carry the store's currency symbol.
+ * prices are written exactly as the store's own website writes them, symbol and separators alike.
  */
 class LabelRenderer {
 
@@ -81,14 +81,21 @@ class LabelRenderer {
     /**
      * Measures the whole label at [scale], where 1 means the full type sizes.
      *
-     * Every vertical dimension scales together — type, gaps, padding and the barcode's height — so
-     * the label keeps its proportions as it shrinks instead of collapsing one element at a time.
-     * The barcode's *width* never scales: its bars stay one printer dot wide, because a re-encoded
-     * narrower barcode is what stops scanning first.
+     * Type, gaps and the barcode's height scale together, so the label keeps its proportions as it
+     * shrinks instead of collapsing one element at a time. Two dimensions deliberately don't:
+     *
+     * The barcode's *width*, because its bars stay one printer dot wide — a re-encoded narrower
+     * barcode is what stops scanning first.
+     *
+     * The [PADDING], because it is the margin every label shares. Scaling it would move the top and
+     * left edges of the printed block by whichever scale that particular product happened to need,
+     * so a shelf of labels would start on a different line and a different column product by
+     * product — which is exactly the alignment the layout exists to hold. It is 14 px out of 320,
+     * so keeping it fixed costs the shrink loop almost nothing.
      */
     private fun plan(product: Product, settings: LabelSettings, scale: Float): Plan {
         val width = LABEL_WIDTH_PX
-        val padding = (PADDING * scale).roundToInt().coerceAtLeast(MIN_PADDING)
+        val padding = PADDING
         // The stacked text lines sit almost on top of each other, so they read as one block rather
         // than as separate facts, and the space that buys goes to the blank footer.
         val lineGap = (LINE_GAP * scale).roundToInt().coerceAtLeast(MIN_LINE_GAP)
@@ -99,7 +106,7 @@ class LabelRenderer {
             color = Color.BLACK
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        // Brand, SKU and UVP are the same size and weight: three lines of the same kind of detail.
+        // Brand, SKU, VE and UVP are the same size and weight: lines of the same kind of detail.
         val infoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
             textSize = INFO_TEXT_SIZE * scale
@@ -124,13 +131,18 @@ class LabelRenderer {
         // Printed bare: on a shelf label the code under the brand is the SKU, and the word costs a
         // third of the line's width to say what the number already says.
         val skuLine = product.sku.trim().takeIf { settings.showSku && it.isNotBlank() }
+        // The pack size the product is sold in, under the SKU it belongs to. Unlike the prices this
+        // line always has a value — a product with no minimum is sold in ones — so it always prints.
+        val packSizeLine = product.minOrderQuantity
+            .takeIf { settings.showPackSize }
+            ?.let { "$PACK_SIZE_PREFIX ${it.coerceAtLeast(1)}" }
         // Only stores running an MSRP plugin carry one; everywhere else this line is simply absent.
         val msrpLine = product.msrp.trim()
             .takeIf { settings.showMsrp && it.isNotBlank() }
-            ?.let { "$MSRP_PREFIX $it ${CurrencyFormatter.symbol}" }
+            ?.let { "$MSRP_PREFIX ${CurrencyFormatter.format(it)}" }
         val priceLine = product.price.trim()
             .takeIf { settings.showPrice && it.isNotBlank() }
-            ?.let { "$PRICE_PREFIX $it ${CurrencyFormatter.symbol}" }
+            ?.let { "$PRICE_PREFIX ${CurrencyFormatter.format(it)}" }
         // The barcode is the EAN and nothing else. A product the store has no EAN for prints no
         // barcode: a label whose barcode is really a SKU scans as a code the counter can't sell,
         // and it looks identical to a correct one, so the missing barcode is the safer failure.
@@ -146,6 +158,7 @@ class LabelRenderer {
         nameLayout?.let { rows += Row(Element.Wrapped(it), lineGap) }
         brandLine?.let { rows += Row(Element.Line(it, infoPaint), lineGap) }
         skuLine?.let { rows += Row(Element.Line(it, infoPaint), lineGap) }
+        packSizeLine?.let { rows += Row(Element.Line(it, infoPaint), lineGap) }
         msrpLine?.let { rows += Row(Element.Line(it, infoPaint), lineGap) }
         priceLine?.let { rows += Row(Element.Line(it, pricePaint), lineGap) }
         // Whatever the text block ends with, the barcode gets air above it — it is a separate thing
@@ -310,8 +323,8 @@ class LabelRenderer {
         private const val MIN_SCALE = 0.6f
         private const val SCALE_STEP = 0.05f
 
+        /** The margin every label shares, whatever its content had to shrink to. */
         private const val PADDING = 14
-        private const val MIN_PADDING = 6
 
         /** Between the stacked text lines, and between that block and the barcode. */
         private const val LINE_GAP = 3
@@ -340,5 +353,11 @@ class LabelRenderer {
          */
         private const val MSRP_PREFIX = "UVP"
         private const val PRICE_PREFIX = "EK"
+
+        /**
+         * Verpackungseinheit — the pack the product is sold in, and the trade's own abbreviation
+         * for it. "VE 6" tells the shelf that six is the smallest number that leaves the warehouse.
+         */
+        private const val PACK_SIZE_PREFIX = "VE"
     }
 }

@@ -76,6 +76,7 @@ import me.sourov.quicksale.appContainer
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.ShippingOption
+import me.sourov.quicksale.ui.CurrencyFormatter
 import me.sourov.quicksale.ui.components.QuickSaleCard
 import me.sourov.quicksale.ui.components.SectionHeader
 import me.sourov.quicksale.ui.products.ProductThumbnail
@@ -83,7 +84,6 @@ import me.sourov.quicksale.ui.products.asPrice
 import me.sourov.quicksale.ui.theme.Sizes
 import me.sourov.quicksale.ui.theme.Spacing
 import java.math.BigDecimal
-import java.math.RoundingMode
 
 /**
  * The order builder: cart, delivery and payment, with the running total always in view.
@@ -650,6 +650,5 @@ private fun ScanEmptyState() {
     }
 }
 
-/** Formats a money amount with two decimals and the app's price style. */
-private fun BigDecimal.display(): String =
-    setScale(2, RoundingMode.HALF_UP).toPlainString().asPrice()
+/** Formats a running total the way the store's own website writes a price. */
+private fun BigDecimal.display(): String = CurrencyFormatter.format(this)
