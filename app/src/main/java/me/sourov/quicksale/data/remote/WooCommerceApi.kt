@@ -23,6 +23,13 @@ class WooCommerceApi(settings: StoreSettings) {
 
     data class Page<T>(val items: List<T>, val totalPages: Int)
 
+    /**
+     * A page of the catalog, in every status the store holds it in.
+     *
+     * No `status` filter is sent, and WooCommerce's own default for this route is `any` — drafts,
+     * pending and private products all come down. That is on purpose: the till keeps a faithful
+     * copy of the shop, and [Product.isPublished] decides what the counter may do with each row.
+     */
     suspend fun fetchProducts(page: Int, perPage: Int = 100): Page<Product> {
         val response = http.get(
             path = "wc/v3/products",
@@ -309,6 +316,11 @@ class WooCommerceApi(settings: StoreSettings) {
             description = optString("short_description").ifBlank { optString("description") }.stripHtml(),
             minOrderQuantity = readQuantityRule("min_order_quantity"),
             orderQuantityStep = readQuantityRule("order_quantity_step"),
+            // The whole catalog is synced whatever its status — the route defaults to `status=any`
+            // and is deliberately left that way, so a scan of a product that exists but isn't live
+            // can say so instead of reporting no such product. What the status gates is search and
+            // ordering, and that gate lives in the queries, not in what gets fetched.
+            status = optString("status").ifBlank { Product.STATUS_PUBLISHED },
         )
     }
 

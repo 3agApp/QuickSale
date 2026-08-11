@@ -13,10 +13,15 @@ class ProductRepository(private val dao: ProductDao) {
 
     fun product(id: Long): Flow<Product?> = dao.observeById(id)
 
-    /** Up to 50 products matching the query by name, SKU or EAN, for the order picker. */
+    /** Up to 50 *published* products matching the query by name, SKU or EAN, for the order picker. */
     fun search(query: String): Flow<List<Product>> = dao.search(query.trim())
 
-    /** Exact EAN or SKU match, used to add a scanned/entered barcode straight to the cart. */
+    /**
+     * Exact EAN or SKU match in any status, used to resolve a scanned or entered barcode.
+     *
+     * Callers must check [Product.isPublished] before selling the result — an unpublished product
+     * is returned so the counter can be told why it can't be, not so it can be added anyway.
+     */
     suspend fun findByCode(code: String): Product? = dao.findByCode(code.trim())
 
     /** Updates the local copies of [products], e.g. fresh stock right after an order. */

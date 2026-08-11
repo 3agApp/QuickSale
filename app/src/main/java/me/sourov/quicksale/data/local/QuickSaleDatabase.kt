@@ -11,7 +11,7 @@ import me.sourov.quicksale.BuildConfig
 
 @Database(
     entities = [Product::class, Organization::class, Member::class, OrgLocation::class],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class QuickSaleDatabase : RoomDatabase() {
@@ -33,7 +33,7 @@ abstract class QuickSaleDatabase : RoomDatabase() {
                 .addCallback(SeedCallback)
                 .addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
-                    MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+                    MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
                 )
                 .build()
 
@@ -137,6 +137,24 @@ abstract class QuickSaleDatabase : RoomDatabase() {
         }
 
         /**
+         * v10 stores WooCommerce's product status, which decides whether the counter may search
+         * and sell a product at all.
+         *
+         * Existing rows default to published rather than to their real status: they were synced
+         * before the app knew to ask, and the next sync corrects them. Guessing the other way would
+         * empty the catalog of every till until it next reaches the store.
+         */
+        @VisibleForTesting
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE products ADD COLUMN status TEXT NOT NULL DEFAULT " +
+                        "'${Product.STATUS_PUBLISHED}'"
+                )
+            }
+        }
+
+        /**
          * The organization tables, copied verbatim from the statements Room generates for a fresh
          * install (`QuickSaleDatabase_Impl.createAllTables`).
          *
@@ -173,6 +191,9 @@ abstract class QuickSaleDatabase : RoomDatabase() {
             // No barcode number on the store: its label falls back to the SKU.
             sampleProduct(5, "Canvas Tote Bag", "", "BAG-TOTE", "", "14.00", "14.00", "", "", "instock", 75, 55, "Accessories,Bags", "Heavy-duty canvas tote, perfect for groceries or the beach.", 1, 1),
             sampleProduct(6, "Ceramic Coffee Mug", "", "MUG-CER", "96385074", "11.25", "11.25", "", "", "onbackorder", 0, 66, "Drinkware", "Stoneware mug, 350ml, microwave and dishwasher safe.", 12, 12),
+            // Synced but not live: it must stay out of every list and search, and a scan of its
+            // barcode has to say why rather than report no such product.
+            sampleProduct(7, "Merino Beanie (unreleased)", "Bergen", "BEANIE-MER", "5012345678900", "24.00", "24.00", "", "", "instock", 40, 77, "Apparel", "Fine-knit merino beanie. Autumn range.", 1, 1, status = "draft"),
         )
 
         /**
@@ -205,11 +226,12 @@ abstract class QuickSaleDatabase : RoomDatabase() {
             regular: String, sale: String, msrp: String, stockStatus: String, qty: Int,
             imageSeed: Int, categories: String, description: String,
             minOrderQuantity: Int, orderQuantityStep: Int,
+            status: String = Product.STATUS_PUBLISHED,
         ): String {
             val image = "https://picsum.photos/seed/$imageSeed/400/400"
             return "INSERT INTO products " +
-                "(id, name, brand, sku, ean, price, regularPrice, salePrice, msrp, stockStatus, stockQuantity, imageUrl, categories, description, minOrderQuantity, orderQuantityStep) VALUES " +
-                "($id, '$name', '$brand', '$sku', '$ean', '$price', '$regular', '$sale', '$msrp', '$stockStatus', $qty, '$image', '$categories', '${description.sqlEscaped()}', $minOrderQuantity, $orderQuantityStep)"
+                "(id, name, brand, sku, ean, price, regularPrice, salePrice, msrp, stockStatus, stockQuantity, imageUrl, categories, description, minOrderQuantity, orderQuantityStep, status) VALUES " +
+                "($id, '$name', '$brand', '$sku', '$ean', '$price', '$regular', '$sale', '$msrp', '$stockStatus', $qty, '$image', '$categories', '${description.sqlEscaped()}', $minOrderQuantity, $orderQuantityStep, '$status')"
         }
 
         private fun sampleOrganization(

@@ -42,7 +42,32 @@ data class Product(
      * Always at least 1, so a product with no step still moves one unit at a time.
      */
     val orderQuantityStep: Int = 1,
+    /**
+     * WooCommerce's own post status — `publish`, `draft`, `pending`, `private`, `future`.
+     *
+     * The catalog syncs whatever the store holds, status and all, so the till's copy matches the
+     * shop rather than a filtered view of it. What the status decides is what the counter may
+     * *do* with a product: only a published one is searchable and orderable, and everything else
+     * exists locally so a scan can say why it isn't.
+     */
+    val status: String = STATUS_PUBLISHED,
 ) {
+    /** True when the store has this product live — the only state the counter may sell in. */
+    val isPublished: Boolean get() = status == STATUS_PUBLISHED
+
+    /** How to name this product's state to whoever just scanned it. */
+    val statusLabel: String
+        get() = when (status) {
+            "draft" -> "a draft"
+            "pending" -> "pending review"
+            "private" -> "private"
+            "future" -> "scheduled"
+            "trash" -> "in the trash"
+            STATUS_PUBLISHED -> "published"
+            // An unknown status is a plugin's own; naming it beats calling it something it isn't.
+            else -> "\"$status\""
+        }
+
     val onSale: Boolean get() = salePrice.isNotBlank() && salePrice != regularPrice
 
     val hasMsrp: Boolean get() = msrp.isNotBlank()
@@ -67,5 +92,13 @@ data class Product(
         val step = orderQuantityStep.coerceAtLeast(1)
         if (desired < min) return 0
         return min + ((desired - min) / step) * step
+    }
+
+    companion object {
+        /**
+         * The one status the counter may sell in. Kept here and repeated literally in [ProductDao]'s
+         * queries, which Room compiles as SQL and so cannot read a constant.
+         */
+        const val STATUS_PUBLISHED = "publish"
     }
 }

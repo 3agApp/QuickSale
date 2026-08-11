@@ -8,16 +8,29 @@ import androidx.room.Query
 import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * The local catalog.
+ *
+ * The table holds the store's products in every status it has them in, but almost nothing here
+ * will show one that isn't published: browsing, counting and searching are the counter's ways of
+ * finding something to sell, and a draft is not for sale. The two lookups that deliberately ignore
+ * the status are [findByCode] and [observeById] — they answer "what is this?" rather than "what can
+ * I sell?", and a scan that finds nothing is indistinguishable from a product the store never had.
+ *
+ * `'publish'` is written literally in each query because Room compiles these to SQL at build time
+ * and cannot read [Product.STATUS_PUBLISHED]; the constant is the one to change with them.
+ */
 @Dao
 interface ProductDao {
 
     @Query(
         """
         SELECT * FROM products
-        WHERE :query = ''
+        WHERE status = 'publish'
+          AND (:query = ''
            OR name LIKE '%' || :query || '%'
            OR sku LIKE '%' || :query || '%'
-           OR (ean != '' AND ean LIKE '%' || :query || '%')
+           OR (ean != '' AND ean LIKE '%' || :query || '%'))
         ORDER BY name COLLATE NOCASE
         """
     )
@@ -26,23 +39,26 @@ interface ProductDao {
     @Query(
         """
         SELECT COUNT(*) FROM products
-        WHERE :query = ''
+        WHERE status = 'publish'
+          AND (:query = ''
            OR name LIKE '%' || :query || '%'
            OR sku LIKE '%' || :query || '%'
-           OR (ean != '' AND ean LIKE '%' || :query || '%')
+           OR (ean != '' AND ean LIKE '%' || :query || '%'))
         """
     )
     fun countMatching(query: String): Flow<Int>
 
+    /** Unfiltered on purpose: the detail screen describes a product, it doesn't sell one. */
     @Query("SELECT * FROM products WHERE id = :id")
     fun observeById(id: Long): Flow<Product?>
 
     @Query(
         """
         SELECT * FROM products
-        WHERE name LIKE '%' || :query || '%'
+        WHERE status = 'publish'
+          AND (name LIKE '%' || :query || '%'
            OR sku LIKE '%' || :query || '%'
-           OR (ean != '' AND ean LIKE '%' || :query || '%')
+           OR (ean != '' AND ean LIKE '%' || :query || '%'))
         ORDER BY name COLLATE NOCASE
         LIMIT 50
         """
@@ -50,8 +66,12 @@ interface ProductDao {
     fun search(query: String): Flow<List<Product>>
 
     /**
-     * Exact match on a scanned or typed code. A barcode reader sends the EAN, so that is tried
-     * first; the SKU still resolves for stores that label their goods with it.
+     * Exact match on a scanned or typed code, in any status. A barcode reader sends the EAN, so
+     * that is tried first; the SKU still resolves for stores that label their goods with it.
+     *
+     * Unpublished products are found here rather than filtered out so the caller can tell the
+     * operator *why* a real product can't be sold. Every caller must check [Product.isPublished]
+     * before putting the result in an order.
      */
     @Query(
         """
@@ -63,7 +83,7 @@ interface ProductDao {
     )
     suspend fun findByCode(code: String): Product?
 
-    @Query("SELECT COUNT(*) FROM products")
+    @Query("SELECT COUNT(*) FROM products WHERE status = 'publish'")
     fun count(): Flow<Int>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

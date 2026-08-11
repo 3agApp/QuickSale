@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -70,6 +71,7 @@ fun ProductsScreen(
 
     val products = viewModel.products.collectAsLazyPagingItems()
     val count by viewModel.matchingCount.collectAsStateWithLifecycle()
+    val unpublished by viewModel.unpublishedMatch.collectAsStateWithLifecycle()
     val syncState by SyncManager.state(SyncTarget.Products).collectAsStateWithLifecycle()
 
     PullToRefreshBox(
@@ -92,6 +94,15 @@ fun ProductsScreen(
             val refreshing = products.loadState.refresh is LoadState.Loading
             when {
                 refreshing && products.itemCount == 0 -> LoadingState()
+
+                // A scanned code that resolves to a product the store hasn't published. Naming it
+                // beats "no matches", which reads as a broken scanner or a stale catalog.
+                products.itemCount == 0 && unpublished != null -> EmptyState(
+                    icon = Icons.Filled.VisibilityOff,
+                    title = "Not published",
+                    message = "${unpublished?.name} is ${unpublished?.statusLabel} on the store, " +
+                        "so it can't be searched or ordered. Publish it on the website, then sync.",
+                )
 
                 products.itemCount == 0 && query.isNotBlank() -> EmptyState(
                     icon = Icons.Filled.Inventory2,

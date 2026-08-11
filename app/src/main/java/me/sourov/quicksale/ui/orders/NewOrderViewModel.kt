@@ -324,13 +324,23 @@ class NewOrderViewModel(
     private suspend fun handleCode(code: String) {
         if (code.isEmpty()) return
         val product = productRepository.findByCode(code)
-        if (product != null) {
-            addProduct(product)
-            _query.value = ""
-            _message.value = "Added ${product.name}"
-        } else {
-            _query.value = code
-            _message.value = "No product matches \"$code\""
+        when {
+            product == null -> {
+                _query.value = code
+                _message.value = "No product matches \"$code\""
+            }
+            // The product exists but the store hasn't published it. Saying so is the whole reason
+            // the lookup ignores status: "no product matches" would send the operator hunting for a
+            // catalog or scanner fault that isn't there, when the fix is one click on the website.
+            !product.isPublished -> {
+                _query.value = ""
+                _message.value = "${product.name} is ${product.statusLabel} on the store, so it can't be ordered"
+            }
+            else -> {
+                addProduct(product)
+                _query.value = ""
+                _message.value = "Added ${product.name}"
+            }
         }
     }
 
