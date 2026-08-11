@@ -73,7 +73,12 @@ class ProductDetailViewModel(
         viewModelScope.launch {
             _printing.value = true
             val result = withContext(Dispatchers.Default) {
-                printer.printBitmap(labelRenderer.render(p, settings), settings.copies, settings.spacing)
+                printer.printBitmap(
+                    bitmap = labelRenderer.render(p, settings),
+                    copies = settings.copies,
+                    feedLines = settings.spacing,
+                    blackMark = settings.feedsToNextLabel,
+                )
             }
             _printing.value = false
             _message.value = when (result) {

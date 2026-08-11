@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -21,6 +22,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
         val SHOW_SKU = booleanPreferencesKey("label_show_sku")
         val SHOW_PRICE = booleanPreferencesKey("label_show_price")
         val SHOW_MSRP = booleanPreferencesKey("label_show_msrp")
+        val MEDIA = stringPreferencesKey("label_media")
         val COPIES = intPreferencesKey("label_copies")
         val SPACING = intPreferencesKey("label_spacing")
     }
@@ -36,6 +38,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
                 showSku = prefs[Keys.SHOW_SKU] ?: defaults.showSku,
                 showPrice = prefs[Keys.SHOW_PRICE] ?: defaults.showPrice,
                 showMsrp = prefs[Keys.SHOW_MSRP] ?: defaults.showMsrp,
+                media = LabelMedia.fromSlug(prefs[Keys.MEDIA]),
                 copies = prefs[Keys.COPIES] ?: defaults.copies,
                 spacing = prefs[Keys.SPACING] ?: defaults.spacing,
             )
@@ -47,6 +50,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
     suspend fun setShowSku(value: Boolean) = edit(Keys.SHOW_SKU, value)
     suspend fun setShowPrice(value: Boolean) = edit(Keys.SHOW_PRICE, value)
     suspend fun setShowMsrp(value: Boolean) = edit(Keys.SHOW_MSRP, value)
+    suspend fun setMedia(value: LabelMedia) = edit(Keys.MEDIA, value.slug)
 
     suspend fun setCopies(value: Int) =
         edit(Keys.COPIES, value.coerceIn(LabelSettings.MIN_COPIES, LabelSettings.MAX_COPIES))

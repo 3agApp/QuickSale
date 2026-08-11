@@ -6,6 +6,10 @@ import android.graphics.Bitmap
 class NoPrinterDriver : PrinterDriver {
     override val isAvailable: Boolean = false
     override fun version(): String? = null
-    override suspend fun printBitmap(bitmap: Bitmap, copies: Int, feedLines: Int): PrintResult =
-        PrintResult.Error("This device has no printer")
+    override suspend fun printBitmap(
+        bitmap: Bitmap,
+        copies: Int,
+        feedLines: Int,
+        blackMark: Boolean,
+    ): PrintResult = PrintResult.Error("This device has no printer")
 }

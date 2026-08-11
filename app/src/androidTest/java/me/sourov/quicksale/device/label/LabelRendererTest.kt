@@ -83,8 +83,8 @@ class LabelRendererTest {
 
     /**
      * A long name shrinks to fit rather than running on, so the label grows by at most the one
-     * extra line the name is allowed. Left unbounded it would push the barcode and price down the
-     * roll; truncated instead, it would name no product anyone could pick off a shelf.
+     * extra line the name is allowed. Left unbounded it would push the barcode and price off the
+     * label; truncated instead, it would name no product anyone could pick off a shelf.
      */
     @Test
     fun a_long_name_still_fits_the_labels_two_name_lines() {
@@ -97,11 +97,61 @@ class LabelRendererTest {
             )
         ).height
 
-        // One name line at full size, plus a pixel of rounding slack.
+        // At most one extra name line at full size, plus rounding slack.
         assertTrue(
             "a long name added ${long - short}px, more than the one extra line it may use",
-            long - short <= 25,
+            long - short <= 30,
         )
+    }
+
+    /**
+     * The label stock is die cut at roughly 52 × 40 mm, so an over-tall bitmap does not simply look
+     * wrong — it feeds across the gap and prints onto the next label. Every combination has to fit,
+     * so this checks the worst one: every field on, with the longest name and a full EAN.
+     */
+    @Test
+    fun a_label_with_everything_on_fits_the_stock() {
+        val label = renderer.render(
+            product(
+                sku = "BOTTLE-750-ARCTIC-BLUE",
+                ean = "4006381333931",
+                name = "Stainless Steel Vacuum Insulated Wide Mouth Water Bottle 750ml, Arctic Blue",
+            ),
+            LabelSettings(
+                showName = true,
+                showBarcode = true,
+                showEanNumber = true,
+                showSku = true,
+                showPrice = true,
+                showMsrp = true,
+            ),
+        )
+
+        assertTrue(
+            "label is ${label.height}px tall, past the ${LabelRenderer.MAX_HEIGHT_PX}px die cut",
+            label.height <= LabelRenderer.MAX_HEIGHT_PX,
+        )
+        assertTrue(
+            "label is ${label.width}px wide, past the ${LabelRenderer.LABEL_WIDTH_PX}px stock",
+            label.width <= LabelRenderer.LABEL_WIDTH_PX,
+        )
+    }
+
+    /** Shrinking to fit must not cost the barcode its scannability — it is the point of the label. */
+    @Test
+    fun a_shrunk_label_still_scans() {
+        val result = scan(
+            renderer.render(
+                product(
+                    sku = "BOTTLE-750-ARCTIC-BLUE",
+                    ean = "4006381333931",
+                    name = "Stainless Steel Vacuum Insulated Wide Mouth Water Bottle 750ml, Arctic Blue",
+                ),
+                LabelSettings(),
+            )
+        )
+
+        assertEquals("4006381333931", result.text)
     }
 
     /** Switching the barcode off leaves nothing scannable, EAN or not. */

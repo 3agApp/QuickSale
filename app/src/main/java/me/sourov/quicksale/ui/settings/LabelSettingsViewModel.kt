@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import me.sourov.quicksale.data.settings.LabelMedia
 import me.sourov.quicksale.data.settings.LabelSettings
 import me.sourov.quicksale.data.settings.LabelSettingsRepository
 
@@ -24,6 +25,7 @@ class LabelSettingsViewModel(
     fun setShowSku(value: Boolean) = persist { repository.setShowSku(value) }
     fun setShowPrice(value: Boolean) = persist { repository.setShowPrice(value) }
     fun setShowMsrp(value: Boolean) = persist { repository.setShowMsrp(value) }
+    fun setMedia(value: LabelMedia) = persist { repository.setMedia(value) }
 
     private fun persist(block: suspend () -> Unit) {
         viewModelScope.launch { block() }

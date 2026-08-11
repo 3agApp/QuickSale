@@ -7,15 +7,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.sourov.quicksale.data.settings.LabelMedia
 
 @Composable
 fun LabelSettingsSection(
@@ -32,12 +37,33 @@ fun LabelSettingsSection(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "What to include on a printed product label.",
+            text = "The paper in the printer, and what goes on a label.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "Paper",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(4.dp))
+        LabelMedia.entries.forEach { media ->
+            MediaRow(
+                media = media,
+                selected = settings.media == media,
+                onSelect = { viewModel.setMedia(media) },
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "Fields",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(4.dp))
         SwitchRow("Product name", settings.showName, viewModel::setShowName)
         SwitchRow("Barcode (EAN)", settings.showBarcode, viewModel::setShowBarcode)
         SwitchRow("EAN number", settings.showEanNumber, viewModel::setShowEanNumber)
@@ -52,6 +78,28 @@ fun LabelSettingsSection(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun MediaRow(media: LabelMedia, selected: Boolean, onSelect: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(media.label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = media.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

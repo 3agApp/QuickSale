@@ -35,6 +35,16 @@ class BldPrintManager private constructor(
     fun version(): String = runCatching { method("getPrinterVer").invoke(instance) as? String }
         .getOrNull().orEmpty()
 
+    /**
+     * The firmware's own printer state, or null when it won't say.
+     *
+     * The meaning of each code is undocumented — the vendor's constants live in
+     * `android.bld.print.configuration.PrintConfig$StateType`, which is not on our classpath — so
+     * this is carried into error messages as a raw number rather than interpreted. It is the one
+     * thing that distinguishes "out of paper" from "couldn't find the label" after a failed job.
+     */
+    fun state(): Int? = runCatching { method("getPrinterState").invoke(instance) as? Int }.getOrNull()
+
     companion object {
         const val WIDTH_PIXEL = 384
         const val ALIGN_CENTER = 2

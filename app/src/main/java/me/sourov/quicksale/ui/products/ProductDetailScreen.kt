@@ -287,12 +287,16 @@ private fun LabelPrintSheet(
                 onDecrease = { viewModel.setCopies(settings.copies - 1) },
                 onIncrease = { viewModel.setCopies(settings.copies + 1) },
             )
-            StepperRow(
-                label = "Spacing",
-                value = settings.spacing,
-                onDecrease = { viewModel.setSpacing(settings.spacing - 1) },
-                onIncrease = { viewModel.setSpacing(settings.spacing + 1) },
-            )
+            // On die-cut stock the printer advances to the next label's mark itself, so there is no
+            // gap left for anyone to dial in.
+            if (!settings.feedsToNextLabel) {
+                StepperRow(
+                    label = "Spacing",
+                    value = settings.spacing,
+                    onDecrease = { viewModel.setSpacing(settings.spacing - 1) },
+                    onIncrease = { viewModel.setSpacing(settings.spacing + 1) },
+                )
+            }
 
             Button(
                 onClick = viewModel::print,
