@@ -14,6 +14,7 @@ import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.settings.LabelSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -80,6 +81,29 @@ class LabelRendererTest {
         assertThrows(NotFoundException::class.java) { scan(label) }
     }
 
+    /**
+     * A long name shrinks to fit rather than running on, so the label grows by at most the one
+     * extra line the name is allowed. Left unbounded it would push the barcode and price down the
+     * roll; truncated instead, it would name no product anyone could pick off a shelf.
+     */
+    @Test
+    fun a_long_name_still_fits_the_labels_two_name_lines() {
+        val short = renderer.render(product(sku = "A", ean = "", name = "Tee")).height
+        val long = renderer.render(
+            product(
+                sku = "A",
+                ean = "",
+                name = "Stainless Steel Vacuum Insulated Wide Mouth Water Bottle 750ml, Arctic Blue",
+            )
+        ).height
+
+        // One name line at full size, plus a pixel of rounding slack.
+        assertTrue(
+            "a long name added ${long - short}px, more than the one extra line it may use",
+            long - short <= 25,
+        )
+    }
+
     /** Switching the barcode off leaves nothing scannable, EAN or not. */
     @Test
     fun the_barcode_switch_removes_it_entirely() {
@@ -91,14 +115,15 @@ class LabelRendererTest {
         assertThrows(NotFoundException::class.java) { scan(label) }
     }
 
-    private fun product(sku: String, ean: String) = Product(
+    private fun product(sku: String, ean: String, name: String = "Classic Cotton T-Shirt") = Product(
         id = 1,
-        name = "Classic Cotton T-Shirt",
+        name = name,
         sku = sku,
         ean = ean,
         price = "19.99",
         regularPrice = "19.99",
         salePrice = "",
+        msrp = "24.99",
         stockStatus = "instock",
         stockQuantity = 5,
         imageUrl = null,

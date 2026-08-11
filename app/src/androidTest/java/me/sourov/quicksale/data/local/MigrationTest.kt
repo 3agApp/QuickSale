@@ -142,6 +142,8 @@ class MigrationTest {
                 assertEquals("TSHIRT-001", product?.sku)
                 // v6 adds the column; it fills in on the next catalog sync, not during migration.
                 assertEquals("", product?.ean)
+                // Same for v7's MSRP, which most stores never send at all.
+                assertEquals("", product?.msrp)
                 // A blank EAN must not swallow scans — the SKU still resolves the product.
                 assertEquals(1L, dao.findByCode("TSHIRT-001")?.id)
             }
@@ -184,7 +186,11 @@ class MigrationTest {
 
     private fun openWithRoom(): QuickSaleDatabase =
         Room.databaseBuilder(context, QuickSaleDatabase::class.java, databaseName)
-            .addMigrations(QuickSaleDatabase.MIGRATION_4_5, QuickSaleDatabase.MIGRATION_5_6)
+            .addMigrations(
+                QuickSaleDatabase.MIGRATION_4_5,
+                QuickSaleDatabase.MIGRATION_5_6,
+                QuickSaleDatabase.MIGRATION_6_7,
+            )
             .build()
 
     private val sampleOrganization = Organization(

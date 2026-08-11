@@ -284,12 +284,30 @@ class WooCommerceApi(settings: StoreSettings) {
             price = optString("price"),
             regularPrice = optString("regular_price"),
             salePrice = optString("sale_price"),
+            msrp = readMsrp(),
             stockStatus = optString("stock_status", "instock"),
             stockQuantity = if (isNull("stock_quantity")) null else optInt("stock_quantity"),
             imageUrl = firstImage,
             categories = categoryNames.joinToString(", "),
             description = optString("short_description").ifBlank { optString("description") }.stripHtml(),
         )
+    }
+
+    /**
+     * The product's manufacturer's suggested retail price, or blank when it has none.
+     *
+     * `msrp` is added by a plugin rather than WooCommerce core, so the key may be missing entirely
+     * and its value may be null — both mean the same thing here, and both print nothing. A store
+     * that has no MSRP for a particular product commonly leaves a zero behind rather than removing
+     * the key, so a zero is read as "none" too: "MSRP 0.00" on a shelf label is worse than no line
+     * at all. The value is kept as the store's own string so it formats like every other price.
+     */
+    private fun JSONObject.readMsrp(): String {
+        val value = opt("msrp") ?: return ""
+        if (value == JSONObject.NULL) return ""
+        val text = value.toString().trim()
+        if (text.isBlank() || text.toDoubleOrNull() == 0.0) return ""
+        return text
     }
 
     /**

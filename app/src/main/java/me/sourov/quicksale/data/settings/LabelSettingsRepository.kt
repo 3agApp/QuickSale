@@ -20,6 +20,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
         val SHOW_EAN_NUMBER = booleanPreferencesKey("label_show_ean_number")
         val SHOW_SKU = booleanPreferencesKey("label_show_sku")
         val SHOW_PRICE = booleanPreferencesKey("label_show_price")
+        val SHOW_MSRP = booleanPreferencesKey("label_show_msrp")
         val COPIES = intPreferencesKey("label_copies")
         val SPACING = intPreferencesKey("label_spacing")
     }
@@ -34,6 +35,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
                 showEanNumber = prefs[Keys.SHOW_EAN_NUMBER] ?: defaults.showEanNumber,
                 showSku = prefs[Keys.SHOW_SKU] ?: defaults.showSku,
                 showPrice = prefs[Keys.SHOW_PRICE] ?: defaults.showPrice,
+                showMsrp = prefs[Keys.SHOW_MSRP] ?: defaults.showMsrp,
                 copies = prefs[Keys.COPIES] ?: defaults.copies,
                 spacing = prefs[Keys.SPACING] ?: defaults.spacing,
             )
@@ -44,6 +46,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
     suspend fun setShowEanNumber(value: Boolean) = edit(Keys.SHOW_EAN_NUMBER, value)
     suspend fun setShowSku(value: Boolean) = edit(Keys.SHOW_SKU, value)
     suspend fun setShowPrice(value: Boolean) = edit(Keys.SHOW_PRICE, value)
+    suspend fun setShowMsrp(value: Boolean) = edit(Keys.SHOW_MSRP, value)
 
     suspend fun setCopies(value: Int) =
         edit(Keys.COPIES, value.coerceIn(LabelSettings.MIN_COPIES, LabelSettings.MAX_COPIES))

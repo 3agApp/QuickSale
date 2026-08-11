@@ -17,6 +17,12 @@ data class LabelSettings(
     /** The SKU as plain text. Printed for the counter to read, never encoded as the barcode. */
     val showSku: Boolean = true,
     val showPrice: Boolean = true,
+    /**
+     * The manufacturer's suggested retail price, printed above the selling price. Only stores whose
+     * catalog carries an MSRP have one to print; for every other product the line is simply absent,
+     * so leaving this on costs nothing.
+     */
+    val showMsrp: Boolean = true,
     val copies: Int = 1,
     val spacing: Int = 3,
 ) {

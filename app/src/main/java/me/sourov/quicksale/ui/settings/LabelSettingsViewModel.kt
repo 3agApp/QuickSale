@@ -23,6 +23,7 @@ class LabelSettingsViewModel(
     fun setShowEanNumber(value: Boolean) = persist { repository.setShowEanNumber(value) }
     fun setShowSku(value: Boolean) = persist { repository.setShowSku(value) }
     fun setShowPrice(value: Boolean) = persist { repository.setShowPrice(value) }
+    fun setShowMsrp(value: Boolean) = persist { repository.setShowMsrp(value) }
 
     private fun persist(block: suspend () -> Unit) {
         viewModelScope.launch { block() }

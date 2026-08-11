@@ -16,6 +16,11 @@ data class Product(
     val price: String,
     val regularPrice: String,
     val salePrice: String,
+    /**
+     * The manufacturer's suggested retail price, when the store carries one. Blank when it doesn't:
+     * `msrp` comes from a plugin rather than WooCommerce core, so most catalogs never send it.
+     */
+    val msrp: String,
     val stockStatus: String,
     val stockQuantity: Int?,
     val imageUrl: String?,
@@ -23,6 +28,8 @@ data class Product(
     val description: String,
 ) {
     val onSale: Boolean get() = salePrice.isNotBlank() && salePrice != regularPrice
+
+    val hasMsrp: Boolean get() = msrp.isNotBlank()
 
     val categoryList: List<String>
         get() = categories.split(",").map { it.trim() }.filter { it.isNotBlank() }

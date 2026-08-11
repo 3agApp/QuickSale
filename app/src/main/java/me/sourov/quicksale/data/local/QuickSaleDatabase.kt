@@ -11,7 +11,7 @@ import me.sourov.quicksale.BuildConfig
 
 @Database(
     entities = [Product::class, Organization::class, Member::class, OrgLocation::class],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class QuickSaleDatabase : RoomDatabase() {
@@ -31,7 +31,10 @@ abstract class QuickSaleDatabase : RoomDatabase() {
         private fun build(context: Context): QuickSaleDatabase =
             Room.databaseBuilder(context, QuickSaleDatabase::class.java, "quicksale.db")
                 .addCallback(SeedCallback)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
+                    MIGRATION_6_7,
+                )
                 .build()
 
         /** v2 once stored orders locally; v3 drops them (orders go straight to WooCommerce now). */
@@ -96,6 +99,18 @@ abstract class QuickSaleDatabase : RoomDatabase() {
         }
 
         /**
+         * v7 stores the manufacturer's suggested retail price, for stores whose catalog carries one
+         * (`msrp` is a plugin field, not WooCommerce core). Products keep their rows; the column
+         * fills in on the next catalog sync, and stays empty on a store that doesn't send it.
+         */
+        @VisibleForTesting
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE products ADD COLUMN msrp TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /**
          * The organization tables, copied verbatim from the statements Room generates for a fresh
          * install (`QuickSaleDatabase_Impl.createAllTables`).
          *
@@ -121,13 +136,14 @@ abstract class QuickSaleDatabase : RoomDatabase() {
         }
 
         private val SAMPLE_PRODUCTS = listOf(
-            sampleProduct(1, "Classic Cotton T-Shirt", "TSHIRT-001", "4006381333931", "19.99", "24.99", "19.99", "instock", 120, 11, "Apparel,Tops", "Soft 100% cotton tee with a relaxed fit. Pre-shrunk and machine washable."),
-            sampleProduct(2, "Leather Card Wallet", "WALLET-002", "5901234123457", "39.00", "39.00", "", "instock", 34, 22, "Accessories", "Slim full-grain leather wallet that holds up to six cards."),
-            sampleProduct(3, "Stainless Water Bottle 750ml", "BOTTLE-750", "7622210992659", "22.50", "22.50", "", "outofstock", 0, 33, "Drinkware", "Double-walled vacuum insulated bottle. Keeps drinks cold 24h."),
-            sampleProduct(4, "Wireless Earbuds Pro", "AUDIO-EBP", "0190198001787", "89.00", "109.00", "89.00", "instock", 18, 44, "Electronics,Audio", "Active noise cancelling earbuds with 30h total battery life."),
+            sampleProduct(1, "Classic Cotton T-Shirt", "TSHIRT-001", "4006381333931", "19.99", "24.99", "19.99", "24.99", "instock", 120, 11, "Apparel,Tops", "Soft 100% cotton tee with a relaxed fit. Pre-shrunk and machine washable."),
+            sampleProduct(2, "Leather Card Wallet", "WALLET-002", "5901234123457", "39.00", "39.00", "", "", "instock", 34, 22, "Accessories", "Slim full-grain leather wallet that holds up to six cards."),
+            // A title long enough to need the label's name to shrink below its full size.
+            sampleProduct(3, "Stainless Steel Vacuum Insulated Water Bottle 750ml", "BOTTLE-750", "7622210992659", "22.50", "22.50", "", "27.00", "outofstock", 0, 33, "Drinkware", "Double-walled vacuum insulated bottle. Keeps drinks cold 24h."),
+            sampleProduct(4, "Wireless Earbuds Pro", "AUDIO-EBP", "0190198001787", "89.00", "109.00", "89.00", "129.00", "instock", 18, 44, "Electronics,Audio", "Active noise cancelling earbuds with 30h total battery life."),
             // No barcode number on the store: its label falls back to the SKU.
-            sampleProduct(5, "Canvas Tote Bag", "BAG-TOTE", "", "14.00", "14.00", "", "instock", 75, 55, "Accessories,Bags", "Heavy-duty canvas tote, perfect for groceries or the beach."),
-            sampleProduct(6, "Ceramic Coffee Mug", "MUG-CER", "96385074", "11.25", "11.25", "", "onbackorder", 0, 66, "Drinkware", "Stoneware mug, 350ml, microwave and dishwasher safe."),
+            sampleProduct(5, "Canvas Tote Bag", "BAG-TOTE", "", "14.00", "14.00", "", "", "instock", 75, 55, "Accessories,Bags", "Heavy-duty canvas tote, perfect for groceries or the beach."),
+            sampleProduct(6, "Ceramic Coffee Mug", "MUG-CER", "96385074", "11.25", "11.25", "", "", "onbackorder", 0, 66, "Drinkware", "Stoneware mug, 350ml, microwave and dishwasher safe."),
         )
 
         /**
@@ -157,13 +173,13 @@ abstract class QuickSaleDatabase : RoomDatabase() {
 
         private fun sampleProduct(
             id: Long, name: String, sku: String, ean: String, price: String, regular: String,
-            sale: String, stockStatus: String, qty: Int, imageSeed: Int, categories: String,
-            description: String,
+            sale: String, msrp: String, stockStatus: String, qty: Int, imageSeed: Int,
+            categories: String, description: String,
         ): String {
             val image = "https://picsum.photos/seed/$imageSeed/400/400"
             return "INSERT INTO products " +
-                "(id, name, sku, ean, price, regularPrice, salePrice, stockStatus, stockQuantity, imageUrl, categories, description) VALUES " +
-                "($id, '$name', '$sku', '$ean', '$price', '$regular', '$sale', '$stockStatus', $qty, '$image', '$categories', '$description')"
+                "(id, name, sku, ean, price, regularPrice, salePrice, msrp, stockStatus, stockQuantity, imageUrl, categories, description) VALUES " +
+                "($id, '$name', '$sku', '$ean', '$price', '$regular', '$sale', '$msrp', '$stockStatus', $qty, '$image', '$categories', '$description')"
         }
 
         private fun sampleOrganization(
