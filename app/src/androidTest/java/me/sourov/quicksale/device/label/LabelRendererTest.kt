@@ -1,6 +1,8 @@
 package me.sourov.quicksale.device.label
 
 import android.graphics.Bitmap
+import android.graphics.Color
+import androidx.core.graphics.get
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
@@ -11,6 +13,7 @@ import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.Result
 import com.google.zxing.common.HybridBinarizer
 import me.sourov.quicksale.data.local.Product
+import me.sourov.quicksale.data.settings.LabelMedia
 import me.sourov.quicksale.data.settings.LabelSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -88,13 +91,17 @@ class LabelRendererTest {
      */
     @Test
     fun a_long_name_still_fits_the_labels_two_name_lines() {
-        val short = renderer.render(product(sku = "A", ean = "", name = "Tee")).height
+        // Measured on continuous roll, where the bitmap is the content: a die-cut label is always
+        // the full stock height, so it would report the same number whatever the name did.
+        val roll = LabelSettings(media = LabelMedia.CONTINUOUS)
+        val short = renderer.render(product(sku = "A", ean = "", name = "Tee"), roll).height
         val long = renderer.render(
             product(
                 sku = "A",
                 ean = "",
                 name = "Stainless Steel Vacuum Insulated Wide Mouth Water Bottle 750ml, Arctic Blue",
-            )
+            ),
+            roll,
         ).height
 
         // At most one extra name line at full size, plus rounding slack.
@@ -119,11 +126,13 @@ class LabelRendererTest {
             ),
             LabelSettings(
                 showName = true,
+                showBrand = true,
                 showBarcode = true,
                 showEanNumber = true,
                 showSku = true,
                 showPrice = true,
                 showMsrp = true,
+                media = LabelMedia.CONTINUOUS,
             ),
         )
 
@@ -135,6 +144,69 @@ class LabelRendererTest {
             "label is ${label.width}px wide, past the ${LabelRenderer.LABEL_WIDTH_PX}px stock",
             label.width <= LabelRenderer.LABEL_WIDTH_PX,
         )
+    }
+
+    /**
+     * The bottom of the label is kept blank on purpose, so there is room for a price-gun sticker or
+     * a hand-written note. It is the reason the layout is as tight as it is, and the first thing a
+     * new field would quietly eat, so the footer is asserted rather than left to the eye.
+     */
+    @Test
+    fun a_label_with_everything_on_leaves_its_footer_blank() {
+        LabelMedia.entries.forEach { media ->
+            val label = renderer.render(
+                product(
+                    sku = "BOTTLE-750-ARCTIC-BLUE",
+                    ean = "4006381333931",
+                    name = "Stainless Steel Vacuum Insulated Wide Mouth Water Bottle 750ml, Arctic Blue",
+                ),
+                LabelSettings(media = media),
+            )
+
+            val footerTop = label.height - LabelRenderer.MIN_FOOTER_PX
+            for (y in footerTop until label.height) {
+                for (x in 0 until label.width) {
+                    assertEquals(
+                        "on $media the label prints at ($x, $y), inside its footer",
+                        Color.WHITE,
+                        label[x, y],
+                    )
+                }
+            }
+        }
+    }
+
+    /** A die-cut label is always the full stock height — the printer positions it, not the ink. */
+    @Test
+    fun a_die_cut_label_is_always_the_full_stock_height() {
+        val label = renderer.render(
+            product(sku = "TSHIRT-001", ean = "4006381333931"),
+            LabelSettings(media = LabelMedia.DIE_CUT),
+        )
+
+        assertEquals(LabelRenderer.MAX_HEIGHT_PX, label.height)
+    }
+
+    /** Content hangs from the top of the label, so every product starts on the same line. */
+    @Test
+    fun labels_start_at_the_same_height_whichever_fields_they_have() {
+        val full = renderer.render(product(sku = "TSHIRT-001", ean = "4006381333931"))
+        val sparse = renderer.render(
+            product(sku = "BAG-TOTE", ean = "", brand = ""),
+            LabelSettings(showMsrp = false, showPrice = false),
+        )
+
+        assertEquals(firstPrintedRow(full), firstPrintedRow(sparse))
+    }
+
+    /** The first row of the bitmap carrying any ink, or -1 for a blank label. */
+    private fun firstPrintedRow(label: Bitmap): Int {
+        for (y in 0 until label.height) {
+            for (x in 0 until label.width) {
+                if (label[x, y] != Color.WHITE) return y
+            }
+        }
+        return -1
     }
 
     /** Shrinking to fit must not cost the barcode its scannability — it is the point of the label. */
@@ -165,9 +237,15 @@ class LabelRendererTest {
         assertThrows(NotFoundException::class.java) { scan(label) }
     }
 
-    private fun product(sku: String, ean: String, name: String = "Classic Cotton T-Shirt") = Product(
+    private fun product(
+        sku: String,
+        ean: String,
+        name: String = "Classic Cotton T-Shirt",
+        brand: String = "Northwind",
+    ) = Product(
         id = 1,
         name = name,
+        brand = brand,
         sku = sku,
         ean = ean,
         price = "19.99",

@@ -279,6 +279,7 @@ class WooCommerceApi(settings: StoreSettings) {
         return Product(
             id = optLong("id"),
             name = optString("name").decodeHtmlEntities(),
+            brand = readBrand(),
             sku = optString("sku"),
             ean = readBarcodeNumber(),
             price = optString("price"),
@@ -308,6 +309,31 @@ class WooCommerceApi(settings: StoreSettings) {
         val text = value.toString().trim()
         if (text.isBlank() || text.toDoubleOrNull() == 0.0) return ""
         return text
+    }
+
+    /**
+     * The product's brand, or blank when the store files it under none.
+     *
+     * Brands are a taxonomy, so the product carries a `brands` array — normally one entry, and when
+     * there are several the first is the one a label has room for. Stores that keep the brand as a
+     * product *attribute* rather than the taxonomy are read next: the attribute is named for what
+     * it holds, so a "Brand" or "Marke" attribute is the same fact under a different key, and
+     * reading it beats printing no brand at all.
+     */
+    private fun JSONObject.readBrand(): String {
+        optJSONArray("brands").namesList("name").firstOrNull()
+            ?.let { return it.decodeHtmlEntities() }
+        val attributes = optJSONArray("attributes") ?: return ""
+        for (i in 0 until attributes.length()) {
+            val attribute = attributes.optJSONObject(i) ?: continue
+            if (attribute.optString("name").trim().lowercase() !in BRAND_ATTRIBUTE_NAMES) continue
+            val options = attribute.optJSONArray("options") ?: continue
+            for (j in 0 until options.length()) {
+                val option = options.optString(j).trim()
+                if (option.isNotBlank()) return option.decodeHtmlEntities()
+            }
+        }
+        return ""
     }
 
     /**
@@ -347,6 +373,9 @@ class WooCommerceApi(settings: StoreSettings) {
     }
 
     private companion object {
+        /** Attribute names a store uses for the brand when it doesn't use the brands taxonomy. */
+        val BRAND_ATTRIBUTE_NAMES = setOf("brand", "brands", "marke", "hersteller", "manufacturer")
+
         /** Product meta keys the common WooCommerce barcode/GTIN plugins store the number under. */
         val BARCODE_META_KEYS = listOf(
             "_wpm_gtin_code",

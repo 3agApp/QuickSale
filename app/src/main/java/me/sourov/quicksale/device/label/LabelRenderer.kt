@@ -24,45 +24,59 @@ import kotlin.math.roundToInt
 /**
  * Renders a product label to a monochrome-friendly [Bitmap] that always fits the 53 × 40 mm label
  * stock. The same bitmap drives the on-screen preview and the thermal printer, so what you see is
- * what prints. Which fields appear (name, barcode, EAN number, SKU text, price, MSRP) comes from
- * [LabelSettings].
+ * what prints. Which fields appear comes from [LabelSettings].
+ *
+ * The label reads top-down as a wholesaler's shelf label: name, brand, SKU, UVP, EK, then the
+ * barcode and its digits. Everything above the barcode is one tight left-aligned block — the eye
+ * runs down a single edge instead of hunting for the start of each centred line — and only the
+ * barcode and its number are centred, since a scanner is aimed at the middle of the label.
+ *
+ * The block is deliberately compact: it is capped at [CONTENT_MAX_HEIGHT_PX] so at least
+ * [MIN_FOOTER_PX] of every label stays blank at the bottom, for a price gun, a shelf marking or a
+ * hand-written note.
  *
  * The barcode *is* the product's EAN — the SKU is never encoded, only printed as text — and the
- * price carries the store's currency symbol.
+ * prices carry the store's currency symbol.
  */
 class LabelRenderer {
 
     fun render(product: Product, settings: LabelSettings = LabelSettings()): Bitmap {
         // Lay the label out at full size, then progressively tighter, and print the first version
-        // that fits the stock. Everything switched on lands around 0.9; a label with fewer fields
-        // never leaves full size. Shrinking beats dropping a field: a label missing its price is
-        // wrong in a way nobody notices until the customer is at the counter.
+        // that leaves the footer blank. Shrinking beats dropping a field: a label missing its price
+        // is wrong in a way nobody notices until the customer is at the counter.
         var scale = 1f
         var plan = plan(product, settings, scale)
-        while (plan.height > MAX_HEIGHT_PX && scale > MIN_SCALE) {
+        while (plan.height > CONTENT_MAX_HEIGHT_PX && scale > MIN_SCALE) {
             scale -= SCALE_STEP
             plan = plan(product, settings, scale)
         }
         return draw(plan, settings.media)
     }
 
-    /** One laid-out label: everything measured, nothing drawn yet. */
-    private class Plan(
-        val width: Int,
-        val height: Int,
-        val padding: Int,
-        val gap: Int,
-        val nameLayout: StaticLayout?,
-        val skuLine: String?,
-        val skuPaint: Paint,
-        val codeBitmap: Bitmap?,
-        val eanLine: String?,
-        val codePaint: Paint,
-        val priceLine: String?,
-        val pricePaint: Paint,
-        val msrpLine: String?,
-        val msrpPaint: Paint,
-    )
+    /** One laid-out label: everything measured and ordered, nothing drawn yet. */
+    private class Plan(val width: Int, val height: Int, val padding: Int, val rows: List<Row>)
+
+    /** An element and the blank space that follows it. */
+    private class Row(val element: Element, var gapAfter: Int)
+
+    private sealed interface Element {
+        val height: Int
+
+        /** Text that may wrap, drawn from the label's left padding. */
+        class Wrapped(val layout: StaticLayout) : Element {
+            override val height: Int get() = layout.height
+        }
+
+        /** A single line of text; the paint's own [Paint.textAlign] decides where it sits. */
+        class Line(val text: String, val paint: Paint) : Element {
+            override val height: Int = paint.fontMetrics.let { (it.descent - it.ascent).toInt() }
+        }
+
+        /** The barcode image, centred. */
+        class Code(val bitmap: Bitmap) : Element {
+            override val height: Int get() = bitmap.height
+        }
+    }
 
     /**
      * Measures the whole label at [scale], where 1 means the full type sizes.
@@ -75,38 +89,48 @@ class LabelRenderer {
     private fun plan(product: Product, settings: LabelSettings, scale: Float): Plan {
         val width = LABEL_WIDTH_PX
         val padding = (PADDING * scale).roundToInt().coerceAtLeast(MIN_PADDING)
-        val gap = (GAP * scale).roundToInt().coerceAtLeast(MIN_GAP)
+        // The stacked text lines sit almost on top of each other, so they read as one block rather
+        // than as separate facts, and the space that buys goes to the blank footer.
+        val lineGap = (LINE_GAP * scale).roundToInt().coerceAtLeast(MIN_LINE_GAP)
+        val blockGap = (BLOCK_GAP * scale).roundToInt().coerceAtLeast(MIN_BLOCK_GAP)
         val contentWidth = width - padding * 2
 
         val namePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
+        // Brand, SKU and UVP are the same size and weight: three lines of the same kind of detail.
+        val infoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            textSize = INFO_TEXT_SIZE * scale
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.LEFT
+        }
+        // The selling price is what the label is read for, so it is the one line set large.
+        val pricePaint = Paint(infoPaint).apply { textSize = PRICE_TEXT_SIZE * scale }
+        // The barcode's digits, centred under the bars they repeat, and monospaced so a long number
+        // can be read back in groups or keyed in without losing the place.
         val codePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
             textSize = CODE_TEXT_SIZE * scale
             typeface = Typeface.MONOSPACE
             textAlign = Paint.Align.CENTER
         }
-        // The SKU reads a little smaller than the EAN's digits: it is the counter's fallback way of
-        // naming the product, not the number anyone keys into a till.
-        val skuPaint = Paint(codePaint).apply { textSize = SKU_TEXT_SIZE * scale }
-        val pricePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.BLACK
-            textSize = PRICE_TEXT_SIZE * scale
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textAlign = Paint.Align.CENTER
-        }
-        // The MSRP is a reference price, so it sits below the price it is compared against.
-        val msrpPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.BLACK
-            textSize = MSRP_TEXT_SIZE * scale
-            textAlign = Paint.Align.CENTER
-        }
 
         val nameLayout: StaticLayout? = product.name
             .takeIf { settings.showName && it.isNotBlank() }
             ?.let { buildName(it, namePaint, contentWidth, scale) }
+        val brandLine = product.brand.trim().takeIf { settings.showBrand && it.isNotBlank() }
+        // Printed bare: on a shelf label the code under the brand is the SKU, and the word costs a
+        // third of the line's width to say what the number already says.
+        val skuLine = product.sku.trim().takeIf { settings.showSku && it.isNotBlank() }
+        // Only stores running an MSRP plugin carry one; everywhere else this line is simply absent.
+        val msrpLine = product.msrp.trim()
+            .takeIf { settings.showMsrp && it.isNotBlank() }
+            ?.let { "$MSRP_PREFIX $it ${CurrencyFormatter.symbol}" }
+        val priceLine = product.price.trim()
+            .takeIf { settings.showPrice && it.isNotBlank() }
+            ?.let { "$PRICE_PREFIX $it ${CurrencyFormatter.symbol}" }
         // The barcode is the EAN and nothing else. A product the store has no EAN for prints no
         // barcode: a label whose barcode is really a SKU scans as a code the counter can't sell,
         // and it looks identical to a correct one, so the missing barcode is the safer failure.
@@ -117,43 +141,24 @@ class LabelRenderer {
             ?.let { encode(it, contentWidth, barcodeHeight) }
         // The same number in digits, so a barcode that won't scan can still be read or keyed in.
         val eanLine = ean.takeIf { settings.showEanNumber && it.isNotBlank() }
-        // The SKU prints as plain text for the counter to read. It is never encoded as the barcode.
-        val skuLine = product.sku.trim().takeIf { settings.showSku && it.isNotBlank() }
-            ?.let { "SKU $it" }
-        val priceLine = product.price.trim()
-            .takeIf { settings.showPrice && it.isNotBlank() }
-            ?.let { "${CurrencyFormatter.symbol} $it" }
-        // Only stores running an MSRP plugin carry one; everywhere else this line is simply absent.
-        val msrpLine = product.msrp.trim()
-            .takeIf { settings.showMsrp && it.isNotBlank() }
-            ?.let { "MSRP ${CurrencyFormatter.symbol} $it" }
 
-        var height = padding
-        nameLayout?.let { height += it.height + gap }
-        codeBitmap?.let { height += it.height + gap }
-        eanLine?.let { height += lineHeight(codePaint) + gap }
-        skuLine?.let { height += lineHeight(skuPaint) + gap }
-        priceLine?.let { height += lineHeight(pricePaint) + gap }
-        msrpLine?.let { height += lineHeight(msrpPaint) + gap }
-        height += padding
-        height = height.coerceAtLeast(MIN_HEIGHT_PX)
+        val rows = mutableListOf<Row>()
+        nameLayout?.let { rows += Row(Element.Wrapped(it), lineGap) }
+        brandLine?.let { rows += Row(Element.Line(it, infoPaint), lineGap) }
+        skuLine?.let { rows += Row(Element.Line(it, infoPaint), lineGap) }
+        msrpLine?.let { rows += Row(Element.Line(it, infoPaint), lineGap) }
+        priceLine?.let { rows += Row(Element.Line(it, pricePaint), lineGap) }
+        // Whatever the text block ends with, the barcode gets air above it — it is a separate thing
+        // to look at, and bars crowded against type are harder for a scanner to pick out.
+        if (codeBitmap != null || eanLine != null) rows.lastOrNull()?.gapAfter = blockGap
+        codeBitmap?.let { rows += Row(Element.Code(it), lineGap) }
+        eanLine?.let { rows += Row(Element.Line(it, codePaint), lineGap) }
+        rows.lastOrNull()?.gapAfter = 0
 
-        return Plan(
-            width = width,
-            height = height,
-            padding = padding,
-            gap = gap,
-            nameLayout = nameLayout,
-            skuLine = skuLine,
-            skuPaint = skuPaint,
-            codeBitmap = codeBitmap,
-            eanLine = eanLine,
-            codePaint = codePaint,
-            priceLine = priceLine,
-            pricePaint = pricePaint,
-            msrpLine = msrpLine,
-            msrpPaint = msrpPaint,
-        )
+        val height = (padding * 2 + rows.sumOf { it.element.height + it.gapAfter })
+            .coerceAtLeast(MIN_HEIGHT_PX)
+
+        return Plan(width = width, height = height, padding = padding, rows = rows)
     }
 
     private fun draw(plan: Plan, media: LabelMedia): Bitmap {
@@ -161,34 +166,38 @@ class LabelRenderer {
         // binds if some future field escapes the measurement — and a clipped label beats one that
         // feeds past the die cut and prints across the gap onto the next.
         //
-        // On die-cut stock the label is always the full 40 mm, even when the content needs less:
-        // the printer positions the sticker, not the ink, so a short bitmap would sit high on the
-        // label and every product with a different set of fields would print somewhere else.
-        // Centring the content in a full-height label makes them all land the same way.
+        // On die-cut stock the label is always the full 40 mm, even though the content needs less:
+        // the printer positions the sticker, not the ink. The content hangs from the top, so every
+        // product starts on the same line whichever fields it has, and the space it doesn't use is
+        // left blank at the bottom instead of being shared out around it.
+        //
+        // A continuous roll has no such height to fill, so the footer is added to the bitmap
+        // instead: it is part of the label, not the gap to the next one, and leaving it to the
+        // spacing setting would mean the printed label and the preview no longer agree.
         val content = plan.height.coerceAtMost(MAX_HEIGHT_PX)
-        val height = if (media == LabelMedia.DIE_CUT) MAX_HEIGHT_PX else content
+        val height = if (media == LabelMedia.DIE_CUT) {
+            MAX_HEIGHT_PX
+        } else {
+            (content + MIN_FOOTER_PX).coerceAtMost(MAX_HEIGHT_PX)
+        }
         val bitmap = createBitmap(plan.width, height)
         val canvas = Canvas(bitmap).apply { drawColor(Color.WHITE) }
+        val left = plan.padding.toFloat()
         val centerX = plan.width / 2f
 
-        // Top to bottom: name, SKU, barcode, the barcode's digits, price, MSRP. The SKU sits with
-        // the name as the other way of naming the product, leaving the barcode and its number
-        // together, and the MSRP directly under the price it is there to be compared against.
-        var y = plan.padding + (height - content) / 2f
-        plan.nameLayout?.let { layout ->
-            canvas.withTranslation(plan.padding.toFloat(), y) {
-                layout.draw(this)
+        var y = plan.padding.toFloat()
+        plan.rows.forEach { row ->
+            when (val element = row.element) {
+                is Element.Wrapped -> canvas.withTranslation(left, y) { element.layout.draw(this) }
+                is Element.Line -> {
+                    val x = if (element.paint.textAlign == Paint.Align.CENTER) centerX else left
+                    canvas.drawText(element.text, x, y - element.paint.fontMetrics.ascent, element.paint)
+                }
+                is Element.Code ->
+                    canvas.drawBitmap(element.bitmap, (plan.width - element.bitmap.width) / 2f, y, null)
             }
-            y += layout.height + plan.gap
+            y += row.element.height + row.gapAfter
         }
-        plan.skuLine?.let { y += drawCenteredLine(canvas, it, plan.skuPaint, centerX, y) + plan.gap }
-        plan.codeBitmap?.let { code ->
-            canvas.drawBitmap(code, (plan.width - code.width) / 2f, y, null)
-            y += code.height + plan.gap
-        }
-        plan.eanLine?.let { y += drawCenteredLine(canvas, it, plan.codePaint, centerX, y) + plan.gap }
-        plan.priceLine?.let { y += drawCenteredLine(canvas, it, plan.pricePaint, centerX, y) + plan.gap }
-        plan.msrpLine?.let { y += drawCenteredLine(canvas, it, plan.msrpPaint, centerX, y) + plan.gap }
         return bitmap
     }
 
@@ -224,23 +233,11 @@ class LabelRenderer {
         ellipsize: Boolean,
     ): StaticLayout =
         StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
-            .setAlignment(Layout.Alignment.ALIGN_CENTER)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
             .setMaxLines(maxLines)
             .apply { if (ellipsize) setEllipsize(TextUtils.TruncateAt.END) }
             .setIncludePad(false)
             .build()
-
-    private fun lineHeight(paint: Paint): Int {
-        val fm = paint.fontMetrics
-        return (fm.descent - fm.ascent).toInt()
-    }
-
-    /** Draws one centered line at vertical offset [top]; returns the line's height. */
-    private fun drawCenteredLine(canvas: Canvas, text: String, paint: Paint, cx: Float, top: Float): Int {
-        val fm = paint.fontMetrics
-        canvas.drawText(text, cx, top - fm.ascent, paint)
-        return (fm.descent - fm.ascent).toInt()
-    }
 
     /**
      * Picks the symbology the number actually is. A 13- or 8-digit number is a real EAN and prints
@@ -298,6 +295,15 @@ class LabelRenderer {
         const val MAX_HEIGHT_PX = LABEL_HEIGHT_MM * DOTS_PER_MM
         val LABEL_WIDTH_PX = minOf(BldPrintManager.WIDTH_PIXEL, LABEL_WIDTH_MM * DOTS_PER_MM)
 
+        /**
+         * The bottom of the label the content may not reach into — 8 mm kept deliberately blank, so
+         * there is somewhere to put a price-gun sticker or a hand-written note. This is what the
+         * layout shrinks to satisfy, so it binds before [MAX_HEIGHT_PX] ever does, and every label
+         * carries it whichever paper is loaded.
+         */
+        const val MIN_FOOTER_PX = 64
+        const val CONTENT_MAX_HEIGHT_PX = MAX_HEIGHT_PX - MIN_FOOTER_PX
+
         private const val MIN_HEIGHT_PX = 120
 
         /** How far the layout may shrink to fit the stock, and in what steps. */
@@ -305,11 +311,15 @@ class LabelRenderer {
         private const val SCALE_STEP = 0.05f
 
         private const val PADDING = 14
-        private const val GAP = 12
         private const val MIN_PADDING = 6
-        private const val MIN_GAP = 5
 
-        private const val BARCODE_HEIGHT = 72
+        /** Between the stacked text lines, and between that block and the barcode. */
+        private const val LINE_GAP = 3
+        private const val BLOCK_GAP = 14
+        private const val MIN_LINE_GAP = 2
+        private const val MIN_BLOCK_GAP = 8
+
+        private const val BARCODE_HEIGHT = 60
         /** Roughly 6 mm of bars — below this a scanner starts missing the code at counter speed. */
         private const val MIN_BARCODE_HEIGHT = 48
 
@@ -319,9 +329,16 @@ class LabelRenderer {
         private const val NAME_TEXT_SIZE_STEP = 1f
         private const val NAME_MAX_LINES = 2
 
-        private const val CODE_TEXT_SIZE = 26f
-        private const val SKU_TEXT_SIZE = 22f
+        private const val INFO_TEXT_SIZE = 21f
         private const val PRICE_TEXT_SIZE = 32f
-        private const val MSRP_TEXT_SIZE = 24f
+        private const val CODE_TEXT_SIZE = 22f
+
+        /**
+         * The trade's own names for the two prices, printed ahead of each: UVP is the recommended
+         * retail price, EK the price the label is really about. Two letters carry the distinction
+         * that "MSRP" and an unlabelled number left to the reader's guess.
+         */
+        private const val MSRP_PREFIX = "UVP"
+        private const val PRICE_PREFIX = "EK"
     }
 }

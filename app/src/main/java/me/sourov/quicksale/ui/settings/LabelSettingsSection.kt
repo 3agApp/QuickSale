@@ -65,16 +65,17 @@ fun LabelSettingsSection(
         )
         Spacer(Modifier.height(4.dp))
         SwitchRow("Product name", settings.showName, viewModel::setShowName)
+        SwitchRow("Brand", settings.showBrand, viewModel::setShowBrand)
+        SwitchRow("SKU text", settings.showSku, viewModel::setShowSku)
+        SwitchRow("MSRP (UVP)", settings.showMsrp, viewModel::setShowMsrp)
+        SwitchRow("Price (EK)", settings.showPrice, viewModel::setShowPrice)
         SwitchRow("Barcode (EAN)", settings.showBarcode, viewModel::setShowBarcode)
         SwitchRow("EAN number", settings.showEanNumber, viewModel::setShowEanNumber)
-        SwitchRow("SKU text", settings.showSku, viewModel::setShowSku)
-        SwitchRow("Price", settings.showPrice, viewModel::setShowPrice)
-        SwitchRow("MSRP", settings.showMsrp, viewModel::setShowMsrp)
 
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "The barcode is always the product's EAN — never the SKU. A product without an " +
-                "EAN prints no barcode, and one without an MSRP prints no MSRP line.",
+            text = "Fields print in this order, and a product missing one simply skips it. The " +
+                "barcode is always the product's EAN — never the SKU.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

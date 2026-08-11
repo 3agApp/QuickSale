@@ -20,6 +20,7 @@ class LabelSettingsViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LabelSettings())
 
     fun setShowName(value: Boolean) = persist { repository.setShowName(value) }
+    fun setShowBrand(value: Boolean) = persist { repository.setShowBrand(value) }
     fun setShowBarcode(value: Boolean) = persist { repository.setShowBarcode(value) }
     fun setShowEanNumber(value: Boolean) = persist { repository.setShowEanNumber(value) }
     fun setShowSku(value: Boolean) = persist { repository.setShowSku(value) }

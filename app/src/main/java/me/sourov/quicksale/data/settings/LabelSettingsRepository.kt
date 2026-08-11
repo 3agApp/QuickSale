@@ -17,6 +17,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
 
     private object Keys {
         val SHOW_NAME = booleanPreferencesKey("label_show_name")
+        val SHOW_BRAND = booleanPreferencesKey("label_show_brand")
         val SHOW_BARCODE = booleanPreferencesKey("label_show_barcode")
         val SHOW_EAN_NUMBER = booleanPreferencesKey("label_show_ean_number")
         val SHOW_SKU = booleanPreferencesKey("label_show_sku")
@@ -33,6 +34,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
             val defaults = LabelSettings()
             LabelSettings(
                 showName = prefs[Keys.SHOW_NAME] ?: defaults.showName,
+                showBrand = prefs[Keys.SHOW_BRAND] ?: defaults.showBrand,
                 showBarcode = prefs[Keys.SHOW_BARCODE] ?: defaults.showBarcode,
                 showEanNumber = prefs[Keys.SHOW_EAN_NUMBER] ?: defaults.showEanNumber,
                 showSku = prefs[Keys.SHOW_SKU] ?: defaults.showSku,
@@ -45,6 +47,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
         }
 
     suspend fun setShowName(value: Boolean) = edit(Keys.SHOW_NAME, value)
+    suspend fun setShowBrand(value: Boolean) = edit(Keys.SHOW_BRAND, value)
     suspend fun setShowBarcode(value: Boolean) = edit(Keys.SHOW_BARCODE, value)
     suspend fun setShowEanNumber(value: Boolean) = edit(Keys.SHOW_EAN_NUMBER, value)
     suspend fun setShowSku(value: Boolean) = edit(Keys.SHOW_SKU, value)

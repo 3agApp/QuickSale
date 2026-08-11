@@ -33,6 +33,8 @@ enum class LabelMedia(val slug: String, val label: String, val description: Stri
  */
 data class LabelSettings(
     val showName: Boolean = true,
+    /** The brand, printed under the name. Absent for a product the store files under no brand. */
+    val showBrand: Boolean = true,
     /**
      * The scannable barcode, which is always the product's EAN — the SKU is never encoded. A
      * product without an EAN has no barcode to print.

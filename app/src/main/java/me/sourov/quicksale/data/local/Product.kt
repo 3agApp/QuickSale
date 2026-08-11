@@ -7,6 +7,11 @@ import androidx.room.PrimaryKey
 data class Product(
     @PrimaryKey val id: Long,
     val name: String,
+    /**
+     * The product's brand, printed on its label under the name. Blank when the store doesn't put
+     * the product in a brand — WooCommerce's brands are a taxonomy, so a product may have none.
+     */
+    val brand: String,
     val sku: String,
     /**
      * The product's barcode number — WooCommerce's `global_unique_id` (GTIN/UPC/EAN/ISBN), or the
@@ -30,6 +35,8 @@ data class Product(
     val onSale: Boolean get() = salePrice.isNotBlank() && salePrice != regularPrice
 
     val hasMsrp: Boolean get() = msrp.isNotBlank()
+
+    val hasBrand: Boolean get() = brand.isNotBlank()
 
     val categoryList: List<String>
         get() = categories.split(",").map { it.trim() }.filter { it.isNotBlank() }
