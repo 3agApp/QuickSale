@@ -280,6 +280,7 @@ class WooCommerceApi(settings: StoreSettings) {
             id = optLong("id"),
             name = optString("name").decodeHtmlEntities(),
             sku = optString("sku"),
+            ean = readBarcodeNumber(),
             price = optString("price"),
             regularPrice = optString("regular_price"),
             salePrice = optString("sale_price"),
@@ -291,6 +292,33 @@ class WooCommerceApi(settings: StoreSettings) {
         )
     }
 
+    /**
+     * The product's barcode number.
+     *
+     * WooCommerce 9.2 added `global_unique_id` — one field holding whichever of GTIN, UPC, EAN or
+     * ISBN the product carries — and that is preferred. Stores still on a barcode plugin keep the
+     * number in product meta instead, so the keys those plugins write are checked next, in the
+     * order a store is likeliest to have them.
+     */
+    private fun JSONObject.readBarcodeNumber(): String {
+        optString("global_unique_id").trim().takeIf { it.isNotBlank() }?.let { return it }
+        val meta = optJSONArray("meta_data") ?: return ""
+        val values = buildMap {
+            for (i in 0 until meta.length()) {
+                val entry = meta.optJSONObject(i) ?: continue
+                val key = entry.optString("key")
+                if (key.isBlank() || entry.isNull("value")) continue
+                // Meta values are free-form; only a scalar can be a barcode.
+                val value = entry.opt("value") ?: continue
+                if (value is JSONObject || value is JSONArray) continue
+                putIfAbsent(key, value.toString().trim())
+            }
+        }
+        return BARCODE_META_KEYS.firstNotNullOfOrNull { key ->
+            values[key]?.takeIf { it.isNotBlank() }
+        }.orEmpty()
+    }
+
     private fun JSONArray?.namesList(key: String): List<String> {
         if (this == null) return emptyList()
         return buildList {
@@ -298,5 +326,20 @@ class WooCommerceApi(settings: StoreSettings) {
                 optJSONObject(i)?.optString(key)?.takeIf { it.isNotBlank() }?.let { add(it) }
             }
         }
+    }
+
+    private companion object {
+        /** Product meta keys the common WooCommerce barcode/GTIN plugins store the number under. */
+        val BARCODE_META_KEYS = listOf(
+            "_wpm_gtin_code",
+            "_ean",
+            "ean",
+            "_barcode",
+            "barcode",
+            "_gtin",
+            "gtin",
+            "_upc",
+            "upc",
+        )
     }
 }

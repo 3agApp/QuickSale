@@ -11,6 +11,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
@@ -26,11 +27,17 @@ import me.sourov.quicksale.ui.organizations.OrganizationsScreen
 import me.sourov.quicksale.ui.products.ProductDetailScreen
 import me.sourov.quicksale.ui.products.ProductsScreen
 import me.sourov.quicksale.ui.settings.SettingsScreen
+import me.sourov.quicksale.ui.settings.SettingsSection
+import me.sourov.quicksale.ui.settings.SettingsSectionScreen
 
 object Routes {
     const val PRODUCT_DETAIL = "product_detail"
     const val PRODUCT_ID_ARG = "productId"
     fun productDetail(id: Long) = "$PRODUCT_DETAIL/$id"
+
+    const val SETTINGS_SECTION = "settings_section"
+    const val SETTINGS_SECTION_ARG = "section"
+    fun settingsSection(section: SettingsSection) = "$SETTINGS_SECTION/${section.name}"
 
     const val ORGANIZATION_DETAIL = "organization_detail"
     const val ORGANIZATION_ID_ARG = "organizationId"
@@ -160,11 +167,40 @@ fun QuickSaleNavHost(
         composable(TopLevelDestination.ORGANIZATIONS.route) {
             OrganizationsScreen(
                 query = organizationsQuery,
-                onOrganizationClick = { id -> navController.navigate(Routes.organizationDetail(id)) },
+                // An account with a single member has nothing to pick on its detail screen, so the
+                // tap goes where it was always heading: that member's order.
+                onOrganizationClick = { id, soleMemberUserId ->
+                    navController.navigate(
+                        soleMemberUserId
+                            ?.let { Routes.newOrder(id, it) }
+                            ?: Routes.organizationDetail(id),
+                    )
+                },
             )
         }
         composable(TopLevelDestination.SETTINGS.route) {
-            SettingsScreen(snackbarHostState = snackbarHostState)
+            SettingsScreen(
+                onSectionClick = { section ->
+                    navController.navigate(Routes.settingsSection(section))
+                },
+            )
+        }
+        composable(
+            route = "${Routes.SETTINGS_SECTION}/{${Routes.SETTINGS_SECTION_ARG}}",
+            arguments = listOf(navArgument(Routes.SETTINGS_SECTION_ARG) { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val section = SettingsSection.fromName(
+                backStackEntry.arguments?.getString(Routes.SETTINGS_SECTION_ARG),
+            )
+            // An unknown section can only come from a stale deep link; drop back to the list.
+            if (section == null) {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+            } else {
+                SettingsSectionScreen(
+                    section = section,
+                    snackbarHostState = snackbarHostState,
+                )
+            }
         }
         composable(
             route = "${Routes.PRODUCT_DETAIL}/{${Routes.PRODUCT_ID_ARG}}",

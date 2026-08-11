@@ -146,12 +146,21 @@ private fun ProductRow(product: Product, onClick: () -> Unit) {
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (product.sku.isNotBlank()) {
+                // Both codes are searchable, so both are shown — whichever the operator typed or
+                // scanned is visible on the row that came back. The EAN leads because it's the one
+                // scanners send, so the SKU is what gets clipped on a narrow screen.
+                val codes = listOfNotNull(
+                    product.ean.takeIf { it.isNotBlank() }?.let { "EAN $it" },
+                    product.sku.takeIf { it.isNotBlank() }?.let { "SKU $it" },
+                )
+                if (codes.isNotEmpty()) {
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = "SKU ${product.sku}",
+                        text = codes.joinToString("  ·  "),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 Spacer(Modifier.height(Spacing.sm))
@@ -233,5 +242,5 @@ fun StockBadge(product: Product) {
 
 fun String.asPrice(): String {
     val trimmed = trim()
-    return if (trimmed.isBlank()) "—" else "${CurrencyFormatter.symbol}$trimmed"
+    return if (trimmed.isBlank()) "—" else "${CurrencyFormatter.symbol} $trimmed"
 }

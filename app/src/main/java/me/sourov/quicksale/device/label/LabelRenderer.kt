@@ -17,11 +17,16 @@ import com.google.zxing.MultiFormatWriter
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.settings.LabelSettings
 import me.sourov.quicksale.device.printer.BldPrintManager
+import me.sourov.quicksale.ui.CurrencyFormatter
 
 /**
  * Renders a product label to a monochrome-friendly [Bitmap] sized to the printer width (384 px for
  * 58 mm). The same bitmap drives the on-screen preview and the thermal printer, so what you see is
- * what prints. Which fields appear (name, barcode, SKU text, price) comes from [LabelSettings].
+ * what prints. Which fields appear (name, barcode, EAN number, SKU text, price) comes from
+ * [LabelSettings].
+ *
+ * The barcode *is* the product's EAN — the SKU is never encoded, only printed as text — and the
+ * price carries the store's currency symbol.
  */
 class LabelRenderer {
 
@@ -31,10 +36,10 @@ class LabelRenderer {
 
         val namePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
-            textSize = 27f
+            textSize = 23f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        val skuPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val codePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
             textSize = 26f
             typeface = Typeface.MONOSPACE
@@ -50,16 +55,27 @@ class LabelRenderer {
         val nameLayout: StaticLayout? = product.name
             .takeIf { settings.showName && it.isNotBlank() }
             ?.let { buildText(it, namePaint, contentWidth, maxLines = 2) }
-        val codeBitmap: Bitmap? = product.sku
+        // The barcode is the EAN and nothing else. A product the store has no EAN for prints no
+        // barcode: a label whose barcode is really a SKU scans as a code the counter can't sell,
+        // and it looks identical to a correct one, so the missing barcode is the safer failure.
+        val ean = product.ean.trim()
+        val codeBitmap: Bitmap? = ean
             .takeIf { settings.showBarcode && it.isNotBlank() }
             ?.let { encode(it, contentWidth, BARCODE_HEIGHT) }
-        val skuLine = product.sku.takeIf { settings.showSku && it.isNotBlank() }
-        val priceLine = product.price.trim().takeIf { settings.showPrice && it.isNotBlank() }
+        // The same number in digits, so a barcode that won't scan can still be read or keyed in.
+        val eanLine = ean.takeIf { settings.showEanNumber && it.isNotBlank() }
+        // The SKU prints as plain text for the counter to read. It is never encoded as the barcode.
+        val skuLine = product.sku.trim().takeIf { settings.showSku && it.isNotBlank() }
+            ?.let { "SKU $it" }
+        val priceLine = product.price.trim()
+            .takeIf { settings.showPrice && it.isNotBlank() }
+            ?.let { "${CurrencyFormatter.symbol} $it" }
 
         var height = PADDING
         nameLayout?.let { height += it.height + GAP }
         codeBitmap?.let { height += it.height + GAP }
-        skuLine?.let { height += lineHeight(skuPaint) + GAP }
+        eanLine?.let { height += lineHeight(codePaint) + GAP }
+        skuLine?.let { height += lineHeight(codePaint) + GAP }
         priceLine?.let { height += lineHeight(pricePaint) + GAP }
         height += PADDING
         height = height.coerceAtLeast(120)
@@ -67,6 +83,8 @@ class LabelRenderer {
         val bitmap = createBitmap(width, height)
         val canvas = Canvas(bitmap).apply { drawColor(Color.WHITE) }
 
+        // Top to bottom: name, SKU, barcode, the barcode's digits, price. The SKU sits with the
+        // name as the other way of naming the product, leaving the barcode and its number together.
         var y = PADDING.toFloat()
         nameLayout?.let { layout ->
             canvas.withTranslation(PADDING.toFloat(), y) {
@@ -74,12 +92,13 @@ class LabelRenderer {
             }
             y += layout.height + GAP
         }
+        skuLine?.let { y += drawCenteredLine(canvas, it, codePaint, width / 2f, y) + GAP }
         codeBitmap?.let { code ->
             val x = (width - code.width) / 2f
             canvas.drawBitmap(code, x, y, null)
             y += code.height + GAP
         }
-        skuLine?.let { y += drawCenteredLine(canvas, it, skuPaint, width / 2f, y) + GAP }
+        eanLine?.let { y += drawCenteredLine(canvas, it, codePaint, width / 2f, y) + GAP }
         priceLine?.let { y += drawCenteredLine(canvas, it, pricePaint, width / 2f, y) + GAP }
         return bitmap
     }
@@ -104,9 +123,26 @@ class LabelRenderer {
         return (fm.descent - fm.ascent).toInt()
     }
 
+    /**
+     * Picks the symbology the number actually is. A 13- or 8-digit number is a real EAN and prints
+     * as one, so any retail scanner reads it as the product's GTIN. Anything else the store keeps in
+     * its EAN field — a 12-digit UPC, a 14-digit GTIN, a number with a bad check digit — prints as
+     * Code 128, which encodes it verbatim rather than dropping the barcode.
+     */
+    private fun formatFor(content: String): BarcodeFormat = when {
+        !content.all { it.isDigit() } -> BarcodeFormat.CODE_128
+        content.length == 13 -> BarcodeFormat.EAN_13
+        content.length == 8 -> BarcodeFormat.EAN_8
+        else -> BarcodeFormat.CODE_128
+    }
+
     private fun encode(content: String, w: Int, h: Int): Bitmap? = runCatching {
         val hints = mapOf(EncodeHintType.MARGIN to 0)
-        val matrix = MultiFormatWriter().encode(content, BarcodeFormat.CODE_128, w, h, hints)
+        val format = formatFor(content)
+        val matrix = runCatching { MultiFormatWriter().encode(content, format, w, h, hints) }
+            // A 13-digit number whose check digit is wrong is not an EAN; ZXing refuses it rather
+            // than printing a barcode that scans as a different product. Code 128 takes it as-is.
+            .getOrElse { MultiFormatWriter().encode(content, BarcodeFormat.CODE_128, w, h, hints) }
         val mw = matrix.width
         val mh = matrix.height
         val pixels = IntArray(mw * mh)

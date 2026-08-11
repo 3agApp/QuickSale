@@ -11,7 +11,7 @@ import me.sourov.quicksale.BuildConfig
 
 @Database(
     entities = [Product::class, Organization::class, Member::class, OrgLocation::class],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class QuickSaleDatabase : RoomDatabase() {
@@ -31,7 +31,7 @@ abstract class QuickSaleDatabase : RoomDatabase() {
         private fun build(context: Context): QuickSaleDatabase =
             Room.databaseBuilder(context, QuickSaleDatabase::class.java, "quicksale.db")
                 .addCallback(SeedCallback)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
 
         /** v2 once stored orders locally; v3 drops them (orders go straight to WooCommerce now). */
@@ -84,6 +84,18 @@ abstract class QuickSaleDatabase : RoomDatabase() {
         }
 
         /**
+         * v6 stores each product's barcode number (EAN/GTIN) alongside its SKU, so scans and
+         * searches resolve on it and labels encode it instead of the SKU. Products keep their rows;
+         * the column fills in on the next catalog sync.
+         */
+        @VisibleForTesting
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE products ADD COLUMN ean TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /**
          * The organization tables, copied verbatim from the statements Room generates for a fresh
          * install (`QuickSaleDatabase_Impl.createAllTables`).
          *
@@ -109,42 +121,49 @@ abstract class QuickSaleDatabase : RoomDatabase() {
         }
 
         private val SAMPLE_PRODUCTS = listOf(
-            sampleProduct(1, "Classic Cotton T-Shirt", "TSHIRT-001", "19.99", "24.99", "19.99", "instock", 120, 11, "Apparel,Tops", "Soft 100% cotton tee with a relaxed fit. Pre-shrunk and machine washable."),
-            sampleProduct(2, "Leather Card Wallet", "WALLET-002", "39.00", "39.00", "", "instock", 34, 22, "Accessories", "Slim full-grain leather wallet that holds up to six cards."),
-            sampleProduct(3, "Stainless Water Bottle 750ml", "BOTTLE-750", "22.50", "22.50", "", "outofstock", 0, 33, "Drinkware", "Double-walled vacuum insulated bottle. Keeps drinks cold 24h."),
-            sampleProduct(4, "Wireless Earbuds Pro", "AUDIO-EBP", "89.00", "109.00", "89.00", "instock", 18, 44, "Electronics,Audio", "Active noise cancelling earbuds with 30h total battery life."),
-            sampleProduct(5, "Canvas Tote Bag", "BAG-TOTE", "14.00", "14.00", "", "instock", 75, 55, "Accessories,Bags", "Heavy-duty canvas tote, perfect for groceries or the beach."),
-            sampleProduct(6, "Ceramic Coffee Mug", "MUG-CER", "11.25", "11.25", "", "onbackorder", 0, 66, "Drinkware", "Stoneware mug, 350ml, microwave and dishwasher safe."),
+            sampleProduct(1, "Classic Cotton T-Shirt", "TSHIRT-001", "4006381333931", "19.99", "24.99", "19.99", "instock", 120, 11, "Apparel,Tops", "Soft 100% cotton tee with a relaxed fit. Pre-shrunk and machine washable."),
+            sampleProduct(2, "Leather Card Wallet", "WALLET-002", "5901234123457", "39.00", "39.00", "", "instock", 34, 22, "Accessories", "Slim full-grain leather wallet that holds up to six cards."),
+            sampleProduct(3, "Stainless Water Bottle 750ml", "BOTTLE-750", "7622210992659", "22.50", "22.50", "", "outofstock", 0, 33, "Drinkware", "Double-walled vacuum insulated bottle. Keeps drinks cold 24h."),
+            sampleProduct(4, "Wireless Earbuds Pro", "AUDIO-EBP", "0190198001787", "89.00", "109.00", "89.00", "instock", 18, 44, "Electronics,Audio", "Active noise cancelling earbuds with 30h total battery life."),
+            // No barcode number on the store: its label falls back to the SKU.
+            sampleProduct(5, "Canvas Tote Bag", "BAG-TOTE", "", "14.00", "14.00", "", "instock", 75, 55, "Accessories,Bags", "Heavy-duty canvas tote, perfect for groceries or the beach."),
+            sampleProduct(6, "Ceramic Coffee Mug", "MUG-CER", "96385074", "11.25", "11.25", "", "onbackorder", 0, 66, "Drinkware", "Stoneware mug, 350ml, microwave and dishwasher safe."),
         )
 
         /**
-         * Three organizations covering the states the counter has to handle differently: one
-         * trading normally, one awaiting approval, one suspended.
+         * Four organizations covering the states the counter has to handle differently: one trading
+         * normally, one awaiting approval, one suspended, and one whose single member sends a tap
+         * straight to a new order instead of to the detail screen.
          */
         private val SAMPLE_ORGANIZATIONS = listOf(
             sampleOrganization(12, "Acme GmbH", "active", true, "buy@acme.example", "+49 30 000000", "Berlin", "DE", "Acme GmbH\nAda Byron\n1 Hauptstrasse\n10115 Berlin"),
             sampleOrganization(13, "Northwind Traders", "pending", false, "orders@northwind.example", "+44 20 7946 0000", "London", "GB", "Northwind Traders\nJoan Clarke\n7 Bishopsgate\nLondon EC2N 3AR"),
             sampleOrganization(14, "Lindgren Nordic AB", "suspended", false, "info@lindgren.example", "+46 70 555 0166", "Malmo", "SE", "Lindgren Nordic AB\nSofia Lindgren\nStora Nygatan 12\n211 37 Malmo"),
+            sampleOrganization(15, "Bergen Kaffe AS", "active", false, "post@bergenkaffe.example", "+47 55 55 00 12", "Bergen", "NO", "Bergen Kaffe AS\nIngrid Dahl\nStrandgaten 4\n5013 Bergen"),
 
             sampleMember(7, 12, 45, "Grace Hopper", "grace@acme.example", "admin", "active", true, "all"),
             sampleMember(8, 12, 46, "Alan Turing", "alan@acme.example", "member", "active", true, "3"),
             sampleMember(9, 12, 47, "Katherine Johnson", "kj@acme.example", "member", "inactive", false, "all"),
             sampleMember(10, 13, 48, "Joan Clarke", "joan@northwind.example", "admin", "active", false, "all"),
             sampleMember(11, 14, 49, "Sofia Lindgren", "sofia@lindgren.example", "admin", "active", false, "all"),
+            // The only member of an active account: tapping the row opens her order directly.
+            sampleMember(12, 15, 50, "Ingrid Dahl", "ingrid@bergenkaffe.example", "admin", "active", true, "all"),
 
             sampleLocation(3, 12, "Warehouse North", true, "Grace Hopper\n9 Lagerweg\n20095 Hamburg", "Grace", "Hopper", "", "9 Lagerweg", "", "Hamburg", "", "20095", "DE", "+49 40 123456"),
             sampleLocation(4, 12, "Berlin Office", false, "Acme GmbH\n1 Hauptstrasse\n10115 Berlin", "Ada", "Byron", "Acme GmbH", "1 Hauptstrasse", "", "Berlin", "", "10115", "DE", "+49 30 000000"),
             sampleLocation(5, 13, "Bishopsgate", true, "Joan Clarke\n7 Bishopsgate\nLondon EC2N 3AR", "Joan", "Clarke", "", "7 Bishopsgate", "", "London", "", "EC2N 3AR", "GB", "+44 20 7946 0000"),
+            sampleLocation(6, 15, "Roastery", true, "Ingrid Dahl\nStrandgaten 4\n5013 Bergen", "Ingrid", "Dahl", "Bergen Kaffe AS", "Strandgaten 4", "", "Bergen", "", "5013", "NO", "+47 55 55 00 12"),
         )
 
         private fun sampleProduct(
-            id: Long, name: String, sku: String, price: String, regular: String, sale: String,
-            stockStatus: String, qty: Int, imageSeed: Int, categories: String, description: String,
+            id: Long, name: String, sku: String, ean: String, price: String, regular: String,
+            sale: String, stockStatus: String, qty: Int, imageSeed: Int, categories: String,
+            description: String,
         ): String {
             val image = "https://picsum.photos/seed/$imageSeed/400/400"
             return "INSERT INTO products " +
-                "(id, name, sku, price, regularPrice, salePrice, stockStatus, stockQuantity, imageUrl, categories, description) VALUES " +
-                "($id, '$name', '$sku', '$price', '$regular', '$sale', '$stockStatus', $qty, '$image', '$categories', '$description')"
+                "(id, name, sku, ean, price, regularPrice, salePrice, stockStatus, stockQuantity, imageUrl, categories, description) VALUES " +
+                "($id, '$name', '$sku', '$ean', '$price', '$regular', '$sale', '$stockStatus', $qty, '$image', '$categories', '$description')"
         }
 
         private fun sampleOrganization(

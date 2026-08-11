@@ -130,6 +130,26 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun products_that_predate_the_barcode_column_migrate_with_an_empty_one() {
+        seedVersion4Database()
+
+        val database = openWithRoom()
+        try {
+            runBlocking {
+                val dao = database.productDao()
+                val product = dao.observeById(1).first()
+                assertEquals("TSHIRT-001", product?.sku)
+                // v6 adds the column; it fills in on the next catalog sync, not during migration.
+                assertEquals("", product?.ean)
+                // A blank EAN must not swallow scans — the SKU still resolves the product.
+                assertEquals(1L, dao.findByCode("TSHIRT-001")?.id)
+            }
+        } finally {
+            database.close()
+        }
+    }
+
     /** Builds the database exactly as version 4 left it, including a row worth preserving. */
     private fun seedVersion4Database() {
         val file = context.getDatabasePath(databaseName)
@@ -164,7 +184,7 @@ class MigrationTest {
 
     private fun openWithRoom(): QuickSaleDatabase =
         Room.databaseBuilder(context, QuickSaleDatabase::class.java, databaseName)
-            .addMigrations(QuickSaleDatabase.MIGRATION_4_5)
+            .addMigrations(QuickSaleDatabase.MIGRATION_4_5, QuickSaleDatabase.MIGRATION_5_6)
             .build()
 
     private val sampleOrganization = Organization(

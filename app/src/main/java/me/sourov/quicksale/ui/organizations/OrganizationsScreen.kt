@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Place
+import androidx.compose.material.icons.outlined.ShoppingCartCheckout
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -52,12 +53,15 @@ import me.sourov.quicksale.ui.theme.Spacing
 /**
  * The organizations the till can sell to. This is the B2B replacement for the old customer list:
  * an order belongs to an organization first and a person second.
+ *
+ * [onOrganizationClick] receives the only member's user id for one-member accounts, so a tap can
+ * skip the detail screen — see [OrganizationsViewModel.soleMembers].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrganizationsScreen(
     query: String,
-    onOrganizationClick: (Long) -> Unit,
+    onOrganizationClick: (organizationId: Long, soleMemberUserId: Long?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -70,6 +74,7 @@ fun OrganizationsScreen(
     val organizations = viewModel.organizations.collectAsLazyPagingItems()
     val count by viewModel.matchingCount.collectAsStateWithLifecycle()
     val tallies by viewModel.tallies.collectAsStateWithLifecycle()
+    val soleMembers by viewModel.soleMembers.collectAsStateWithLifecycle()
     val syncState by SyncManager.state(SyncTarget.Organizations).collectAsStateWithLifecycle()
 
     // Pull to refresh: the gesture the list already invites, wired to the same sync as everywhere.
@@ -121,10 +126,12 @@ fun OrganizationsScreen(
                         key = organizations.itemKey { it.id },
                     ) { index ->
                         organizations[index]?.let { organization ->
+                            val soleMemberUserId = soleMembers[organization.id]
                             OrganizationRow(
                                 organization = organization,
                                 tally = tallies[organization.id],
-                                onClick = { onOrganizationClick(organization.id) },
+                                startsOrderDirectly = soleMemberUserId != null,
+                                onClick = { onOrganizationClick(organization.id, soleMemberUserId) },
                             )
                         }
                     }
@@ -138,6 +145,7 @@ fun OrganizationsScreen(
 private fun OrganizationRow(
     organization: Organization,
     tally: OrganizationTally?,
+    startsOrderDirectly: Boolean,
     onClick: () -> Unit,
 ) {
     QuickSaleCard(modifier = Modifier.clickable(onClick = onClick)) {
@@ -174,10 +182,24 @@ private fun OrganizationRow(
                 Spacer(Modifier.height(Spacing.sm))
                 OrganizationStatusChip(organization.orgStatus)
             }
+            // A one-member account goes straight to its order, so the row is coloured like the
+            // action it performs rather than like a step into another list.
             Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                imageVector = if (startsOrderDirectly) {
+                    Icons.Outlined.ShoppingCartCheckout
+                } else {
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight
+                },
+                contentDescription = if (startsOrderDirectly) {
+                    "Start an order for ${organization.name}"
+                } else {
+                    null
+                },
+                tint = if (startsOrderDirectly) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 modifier = Modifier.size(Sizes.iconLarge),
             )
         }

@@ -20,6 +20,7 @@ class LabelSettingsViewModel(
 
     fun setShowName(value: Boolean) = persist { repository.setShowName(value) }
     fun setShowBarcode(value: Boolean) = persist { repository.setShowBarcode(value) }
+    fun setShowEanNumber(value: Boolean) = persist { repository.setShowEanNumber(value) }
     fun setShowSku(value: Boolean) = persist { repository.setShowSku(value) }
     fun setShowPrice(value: Boolean) = persist { repository.setShowPrice(value) }
 

@@ -8,6 +8,11 @@ data class Product(
     @PrimaryKey val id: Long,
     val name: String,
     val sku: String,
+    /**
+     * The product's barcode number — WooCommerce's `global_unique_id` (GTIN/UPC/EAN/ISBN), or the
+     * equivalent meta a barcode plugin writes. Blank when the store doesn't carry one.
+     */
+    val ean: String,
     val price: String,
     val regularPrice: String,
     val salePrice: String,

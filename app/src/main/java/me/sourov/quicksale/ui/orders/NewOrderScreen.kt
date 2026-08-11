@@ -429,11 +429,16 @@ private fun ProductResultRow(product: Product, modifier: Modifier = Modifier) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(product.price.asPrice(), style = MaterialTheme.typography.titleSmall)
-                if (product.sku.isNotBlank()) {
+                // The EAN wins the space when there is one: it's what was scanned.
+                val code = product.ean.takeIf { it.isNotBlank() }?.let { "EAN $it" }
+                    ?: product.sku.takeIf { it.isNotBlank() }?.let { "SKU $it" }
+                if (code != null) {
                     Text(
-                        "SKU ${product.sku}",
+                        code,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }

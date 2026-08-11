@@ -13,11 +13,11 @@ class ProductRepository(private val dao: ProductDao) {
 
     fun product(id: Long): Flow<Product?> = dao.observeById(id)
 
-    /** Up to 50 products matching the query by name or SKU, for the order picker. */
+    /** Up to 50 products matching the query by name, SKU or EAN, for the order picker. */
     fun search(query: String): Flow<List<Product>> = dao.search(query.trim())
 
-    /** Exact SKU match, used to add a scanned/entered barcode straight to the cart. */
-    suspend fun findBySku(sku: String): Product? = dao.findBySku(sku.trim())
+    /** Exact EAN or SKU match, used to add a scanned/entered barcode straight to the cart. */
+    suspend fun findByCode(code: String): Product? = dao.findByCode(code.trim())
 
     /** Updates the local copies of [products], e.g. fresh stock right after an order. */
     suspend fun upsert(products: List<Product>) = dao.upsertAll(products)

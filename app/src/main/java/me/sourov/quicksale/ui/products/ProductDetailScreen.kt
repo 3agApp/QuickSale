@@ -150,6 +150,11 @@ fun ProductDetailScreen(
             DetailRow(label = "SKU", value = current.sku)
         }
 
+        if (current.ean.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            DetailRow(label = "EAN", value = current.ean)
+        }
+
         if (current.categoryList.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
             Text(
@@ -234,6 +239,15 @@ private fun LabelPrintSheet(
     val preview by viewModel.preview.collectAsStateWithLifecycle()
     val printing by viewModel.printing.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val product by viewModel.product.collectAsStateWithLifecycle()
+
+    // The preview already shows the gap, but say why: a label with no barcode reads as a bug
+    // otherwise, and the fix is on the store, not in these settings.
+    val hint = if (settings.showBarcode && product?.ean.isNullOrBlank()) {
+        "This product has no EAN, so its label prints without a barcode."
+    } else {
+        "Choose which fields print in Settings → Label printing."
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -301,7 +315,7 @@ private fun LabelPrintSheet(
             }
 
             Text(
-                text = message ?: "Choose which fields print in Settings → Label printing.",
+                text = message ?: hint,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

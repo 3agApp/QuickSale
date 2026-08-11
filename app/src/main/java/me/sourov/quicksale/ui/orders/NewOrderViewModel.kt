@@ -303,12 +303,12 @@ class NewOrderViewModel(
     }
 
     /**
-     * Resolves a scanned or typed [code]: an exact SKU match is added straight to the cart; otherwise
-     * the code becomes the search query so the operator can pick a matching product.
+     * Resolves a scanned or typed [code]: an exact EAN or SKU match is added straight to the cart;
+     * otherwise the code becomes the search query so the operator can pick a matching product.
      */
     private suspend fun handleCode(code: String) {
         if (code.isEmpty()) return
-        val product = productRepository.findBySku(code)
+        val product = productRepository.findByCode(code)
         if (product != null) {
             addProduct(product)
             _query.value = ""

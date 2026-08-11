@@ -7,7 +7,14 @@ package me.sourov.quicksale.data.settings
  */
 data class LabelSettings(
     val showName: Boolean = true,
+    /**
+     * The scannable barcode, which is always the product's EAN — the SKU is never encoded. A
+     * product without an EAN has no barcode to print.
+     */
     val showBarcode: Boolean = true,
+    /** The EAN's digits, printed under the barcode so it can be read out or keyed in. */
+    val showEanNumber: Boolean = true,
+    /** The SKU as plain text. Printed for the counter to read, never encoded as the barcode. */
     val showSku: Boolean = true,
     val showPrice: Boolean = true,
     val copies: Int = 1,
