@@ -22,6 +22,7 @@ import me.sourov.quicksale.data.local.Organization
 import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.QuickSaleDatabase
 import me.sourov.quicksale.data.remote.WoapApi
+import me.sourov.quicksale.data.remote.WooApiException
 import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.data.settings.AddressFormRepository
 import me.sourov.quicksale.data.settings.CheckoutConfigRepository
@@ -43,6 +44,9 @@ object SyncManager {
 
     private const val MAX_PAGES = 200
     private const val MAX_PARALLEL_PAGE_FETCHES = 4
+
+    /** The snapshot route's refusal for a `page` beyond the last one. */
+    private const val PAGE_NO_LONGER_EXISTS = "woap_rest_invalid_page_number"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -191,7 +195,16 @@ object SyncManager {
         val knownPages = storedEtags.keys.sorted()
         var reportedTotalPages: Int? = null
         for (page in knownPages) {
-            val result = retryOnNetworkBlip { api.fetchOrganizations(page, ifNoneMatch = storedEtags[page]) }
+            val result = try {
+                retryOnNetworkBlip { api.fetchOrganizations(page, ifNoneMatch = storedEtags[page]) }
+            } catch (e: WooApiException) {
+                // The route answers a page past the end with a 400, not an empty list. Probing a
+                // page the app holds an ETag for can only hit that once organizations have been
+                // deleted — which is a definite change, not a failure. Report it as changed and
+                // let the full refetch below rewrite the (now shorter) set of page ETags.
+                if (e.code == PAGE_NO_LONGER_EXISTS) return false
+                throw e
+            }
             if (!result.notModified) return false
             reportedTotalPages = result.totalPages
         }

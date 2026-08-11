@@ -11,6 +11,14 @@ data class AddressField(
     /** Submitted under this name inside the order's `shipping` block. */
     val name: String,
     val label: String,
+    /**
+     * Taken from the served form and never second-guessed against WooCommerce's published
+     * defaults. The shop's own answer differs from them on purpose: `last_name` is never required
+     * (a delivery address belongs to a place as often as to a person — "Warehouse North" has no
+     * surname, so the place name goes in `first_name`), and neither is `phone`, whatever the
+     * checkout's phone setting says, because that setting is a rule about the person buying.
+     * Marking either required here would refuse an address the shop's own checkout accepts.
+     */
     val required: Boolean,
     val hidden: Boolean,
     /** `text`, `tel`, `country`, `state`, … — drives the keyboard and the control. */
