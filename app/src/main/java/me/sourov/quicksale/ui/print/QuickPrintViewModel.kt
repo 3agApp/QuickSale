@@ -138,6 +138,14 @@ class QuickPrintViewModel(
         viewModelScope.launch { labelSettingsRepository.setCopies(value) }
     }
 
+    /**
+     * Blank lines fed after each label. Only continuous roll has a gap to dial in — on die-cut
+     * stock the printer seeks the next label's black mark itself and this is ignored.
+     */
+    fun setSpacing(value: Int) {
+        viewModelScope.launch { labelSettingsRepository.setSpacing(value) }
+    }
+
     fun clearHistory() { _history.value = emptyList() }
 
     /**

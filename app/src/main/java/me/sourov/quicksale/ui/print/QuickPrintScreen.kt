@@ -128,13 +128,33 @@ fun QuickPrintScreen(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(Spacing.lg))
         QuickSaleCard {
             Column(Modifier.padding(Spacing.md)) {
-                CopiesStepper(
-                    copies = settings.copies,
+                LabelStepper(
+                    label = "Copies per scan",
+                    value = settings.copies,
+                    min = LabelSettings.MIN_COPIES,
+                    max = LabelSettings.MAX_COPIES,
                     onChange = viewModel::setCopies,
                 )
+                // On die-cut stock the printer advances to the next label's mark itself, so there
+                // is no gap left for anyone to dial in — the same reason the product screen's print
+                // sheet hides it. Change the stock in Settings → Label printing.
+                if (!settings.feedsToNextLabel) {
+                    LabelStepper(
+                        label = "Spacing",
+                        value = settings.spacing,
+                        min = LabelSettings.MIN_SPACING,
+                        max = LabelSettings.MAX_SPACING,
+                        onChange = viewModel::setSpacing,
+                    )
+                }
                 Text(
-                    text = "Every scan prints this many. Choose which fields print in " +
-                        "Settings → Label printing.",
+                    text = if (settings.feedsToNextLabel) {
+                        "Every scan prints this many. Choose which fields print in " +
+                            "Settings → Label printing."
+                    } else {
+                        "Every scan prints this many labels, with that many blank lines fed " +
+                            "after each. Choose which fields print in Settings → Label printing."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -399,8 +419,15 @@ private fun HistoryRow(entry: PrintedLabel) {
     }
 }
 
+/** The print settings this screen edits, held to the same bounds the repository clamps to. */
 @Composable
-private fun CopiesStepper(copies: Int, onChange: (Int) -> Unit) {
+private fun LabelStepper(
+    label: String,
+    value: Int,
+    min: Int,
+    max: Int,
+    onChange: (Int) -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -408,24 +435,24 @@ private fun CopiesStepper(copies: Int, onChange: (Int) -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text("Copies per scan", style = MaterialTheme.typography.titleSmall)
+        Text(label, style = MaterialTheme.typography.titleSmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
             FilledTonalIconButton(
-                onClick = { onChange(copies - 1) },
-                enabled = copies > LabelSettings.MIN_COPIES,
+                onClick = { onChange(value - 1) },
+                enabled = value > min,
             ) {
-                Icon(Icons.Filled.Remove, contentDescription = "One fewer copy")
+                Icon(Icons.Filled.Remove, contentDescription = "Decrease $label")
             }
             Text(
-                text = copies.toString(),
+                text = value.toString(),
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = Spacing.lg),
             )
             FilledTonalIconButton(
-                onClick = { onChange(copies + 1) },
-                enabled = copies < LabelSettings.MAX_COPIES,
+                onClick = { onChange(value + 1) },
+                enabled = value < max,
             ) {
-                Icon(Icons.Filled.Add, contentDescription = "One more copy")
+                Icon(Icons.Filled.Add, contentDescription = "Increase $label")
             }
         }
     }
