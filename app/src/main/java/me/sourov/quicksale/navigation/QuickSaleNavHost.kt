@@ -9,12 +9,19 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
@@ -282,14 +289,10 @@ fun QuickSaleNavHost(
             arguments = listOf(navArgument(Routes.ORGANIZATION_ID_ARG) { type = NavType.LongType }),
         ) { backStackEntry ->
             val id = backStackEntry.arguments?.getLong(Routes.ORGANIZATION_ID_ARG) ?: 0L
-            OrganizationDetailScreen(
+            OrganizationDetail(
                 organizationId = id,
-                // Starting an order from the account side attaches the customer to the standing
-                // cart and drops the operator on the till, rather than opening a second order.
-                onStartOrder = { memberUserId ->
-                    sellViewModel.selectCustomer(Customer(id, memberUserId))
-                    navController.returnToSell()
-                },
+                sellViewModel = sellViewModel,
+                onStarted = navController::returnToSell,
                 onViewOrders = { navController.navigate(Routes.orderList(id)) },
             )
         }
@@ -392,8 +395,92 @@ fun QuickSaleNavHost(
     }
 }
 
+/**
+ * One account, with a guard around the cart it is about to take over.
+ *
+ * Tapping a member starts that person's order on the *standing* cart — the one shared with the Sell
+ * tab. When that cart already holds someone else's items, silently re-pointing it at a new customer
+ * bills one company for another company's goods, and nothing on screen says so. It happened during
+ * testing and produced a real order on the store.
+ *
+ * So a cart with items belonging to a different customer asks first, and the confirming action
+ * empties it. Moving items between customers is still possible — deliberately, via *Change* on the
+ * checkout — but it is no longer what a single tap on a name does.
+ */
+@Composable
+private fun OrganizationDetail(
+    organizationId: Long,
+    sellViewModel: SellViewModel,
+    onStarted: () -> Unit,
+    onViewOrders: () -> Unit,
+) {
+    val lines by sellViewModel.lines.collectAsStateWithLifecycle()
+    val customer by sellViewModel.customer.collectAsStateWithLifecycle()
+    val heldFor by sellViewModel.organization.collectAsStateWithLifecycle()
+    var pendingMemberUserId by remember { mutableStateOf<Long?>(null) }
+
+    fun start(memberUserId: Long) {
+        sellViewModel.selectCustomer(Customer(organizationId, memberUserId))
+        onStarted()
+    }
+
+    OrganizationDetailScreen(
+        organizationId = organizationId,
+        onStartOrder = { memberUserId ->
+            val wanted = Customer(organizationId, memberUserId)
+            val occupied = lines.isNotEmpty() && customer != null && customer != wanted
+            if (occupied) pendingMemberUserId = memberUserId else start(memberUserId)
+        },
+        onViewOrders = onViewOrders,
+    )
+
+    pendingMemberUserId?.let { memberUserId ->
+        val itemCount = lines.sumOf { it.quantity }
+        AlertDialog(
+            onDismissRequest = { pendingMemberUserId = null },
+            title = { Text("There's already an order open") },
+            text = {
+                Text(
+                    "The till is holding ${itemCount.itemsLabel()} for " +
+                        "${heldFor?.name ?: "another account"}. Starting a new order clears it.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingMemberUserId = null
+                        sellViewModel.clearCart()
+                        start(memberUserId)
+                    },
+                ) {
+                    Text("Clear and start")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingMemberUserId = null }) { Text("Keep it") }
+            },
+        )
+    }
+}
+
+private fun Int.itemsLabel(): String = "$this ${if (this == 1) "item" else "items"}"
+
 /** Navigates to a top-level tab with the standard single-top / save-restore behaviour. */
 fun NavHostController.navigateToTopLevel(destination: TopLevelDestination) {
+    // Step off whatever is stacked on top of the current tab before switching away from it.
+    //
+    // `saveState`/`restoreState` are built for a graph per tab, where each tab owns its own back
+    // stack. This graph is flat, so `popUpTo(start) { saveState = true }` saves *everything* it
+    // pops as one chunk belonging to the tab being left — Settings, an order, a product page and
+    // all. Coming back to that tab then replayed the chunk and dropped you on Settings instead of
+    // the tab you asked for.
+    //
+    // Popping first means only tab roots are ever saved: switching between two tabs still restores
+    // each one's scroll position, and a pushed screen is simply left behind, which is what tapping
+    // a different section of the app plainly means.
+    if (TopLevelDestination.fromRoute(currentBackStackEntry?.destination?.route) == null) {
+        popBackStack(graph.startDestinationId, inclusive = false)
+    }
     navigate(destination.route) {
         popUpTo(graph.startDestinationId) { saveState = true }
         launchSingleTop = true
