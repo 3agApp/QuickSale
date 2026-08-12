@@ -32,7 +32,7 @@ class BranchFormViewModel(
     private val organizationId: Long,
     /** Null when adding; the branch being edited otherwise. */
     private val existing: OrgLocation?,
-    organizationRepository: OrganizationRepository,
+    private val organizationRepository: OrganizationRepository,
     addressFormRepository: AddressFormRepository,
     private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
@@ -137,11 +137,15 @@ class BranchFormViewModel(
                 // ticked; an account whose only branch isn't default has no sensible default.
                 val default = _isDefault.value || branchCount.value.isEmpty()
 
-                if (existing == null) {
+                val saved = if (existing == null) {
                     api.createLocation(organizationId, branchName, default, payload)
                 } else {
                     api.updateLocation(organizationId, existing.id, branchName, default, payload)
                 }
+                // Applied locally straight away, from the row the store returned rather than from
+                // what was typed: a new branch has to be in the picker for the order being built
+                // right now, not after the next snapshot comes down.
+                organizationRepository.saveLocation(saved)
                 _saved.value = true
             } catch (e: WooApiException) {
                 // A validation refusal names the fields; mark those and keep the message for the

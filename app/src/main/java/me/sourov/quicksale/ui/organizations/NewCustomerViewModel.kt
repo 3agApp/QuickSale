@@ -225,6 +225,11 @@ class NewCustomerViewModel(
                     firstName = first,
                     lastName = last,
                 )
+                // Applied locally so the person who was just signed up is selectable for the order
+                // being built right now. Without this the customer picker — which reads only the
+                // local copy — could not find them until the next snapshot came down.
+                organizationRepository.saveOrganization(organization)
+                organizationRepository.saveMember(member)
                 _created.value = CreatedCustomer(
                     organizationId = organization.id,
                     memberUserId = member.userId,

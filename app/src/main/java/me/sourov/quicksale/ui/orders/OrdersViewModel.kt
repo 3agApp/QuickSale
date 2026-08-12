@@ -58,7 +58,7 @@ class OrdersViewModel(
                 }
                 _orders.value = WooCommerceApi(settings).fetchOrders(perPage = PAGE_SIZE).items
             } catch (e: Exception) {
-                _error.value = OrderError.from(e)
+                _error.value = OrderError.forRead(e)
             } finally {
                 _loading.value = false
             }

@@ -190,12 +190,9 @@ fun OrganizationsScreen(
     if (creating) {
         NewCustomerSheet(
             onDismiss = { creating = false },
-            onCreated = {
-                creating = false
-                // They exist on the store but not yet in the local snapshot; the sync is what
-                // makes them appear in this list.
-                SyncManager.syncOrganizations(context)
-            },
+            // The sheet writes the new company and person into the local copy itself, so they
+            // are in this list before the sheet has finished closing.
+            onCreated = { creating = false },
         )
     }
 }

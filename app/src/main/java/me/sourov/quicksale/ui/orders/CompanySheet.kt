@@ -30,11 +30,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.sourov.quicksale.data.local.OrgLocation
-import me.sourov.quicksale.data.sync.SyncManager
 import me.sourov.quicksale.ui.components.Monogram
 import me.sourov.quicksale.ui.components.QuickSaleCard
 import me.sourov.quicksale.ui.components.SectionHeader
@@ -59,7 +57,6 @@ fun CompanySheet(
     viewModel: SellViewModel,
     onDismiss: () -> Unit,
 ) {
-    val context = LocalContext.current
     val organization by viewModel.organization.collectAsStateWithLifecycle()
     val branches by viewModel.allLocations.collectAsStateWithLifecycle()
 
@@ -170,12 +167,9 @@ fun CompanySheet(
             organizationId = current.id,
             existing = edit.branch,
             onDismiss = { editing = null },
-            onSaved = {
-                editing = null
-                // The snapshot is the truthful copy; a write is followed by a resync rather than a
-                // local edit, which is also what makes the new branch appear in this very list.
-                SyncManager.syncOrganizations(context)
-            },
+            // The branch form applies the saved row locally, which is what makes it appear in
+            // this list — and in the delivery picker of the order being built behind it.
+            onSaved = { editing = null },
         )
     }
 }

@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -55,6 +56,11 @@ fun OrdersScreen(
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val loading by viewModel.loading.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
+
+    // Refetch when the network comes back. The first load of a list opened offline returns
+    // nothing, and without this the screen kept saying "No orders yet" long after it was wrong.
+    val online by container.connectivity.online.collectAsStateWithLifecycle(initialValue = true)
+    LaunchedEffect(online) { if (online) viewModel.refresh() }
 
     // Recomputed per composition rather than remembered: a fair runs past midnight, and a cached
     // "today" would quietly start meaning yesterday.

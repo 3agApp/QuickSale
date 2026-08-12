@@ -18,7 +18,8 @@ import me.sourov.quicksale.BuildConfig
         CartLineRecord::class,
         CartCustomerRecord::class,
     ],
-    version = 11,
+    // 12 is skipped deliberately — see MIGRATION_12_13.
+    version = 13,
     exportSchema = false,
 )
 abstract class QuickSaleDatabase : RoomDatabase() {
@@ -42,6 +43,7 @@ abstract class QuickSaleDatabase : RoomDatabase() {
                 .addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
                     MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
+                    MIGRATION_11_13, MIGRATION_12_13,
                 )
                 .build()
 
@@ -174,6 +176,32 @@ abstract class QuickSaleDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 CART_SCHEMA.forEach(db::execSQL)
             }
+        }
+
+        /**
+         * v13 has no `outbox` table.
+         *
+         * A v12 existed briefly that queued orders the store couldn't be reached for; the decision
+         * since is that orders are network-only and only the catalog and the account snapshot live
+         * on the device. The version goes *forward* rather than back to 11 because Room refuses to
+         * open a database newer than the code — reverting the number crashes on launch for anyone
+         * who ran the v12 build, and Room also checks a schema hash, so redefining 12 crashes them
+         * too. 13 is the only number that lets both v11 and v12 devices open without being wiped.
+         *
+         * Two paths, one behaviour: dropping a table that may or may not be there.
+         */
+        @VisibleForTesting
+        val MIGRATION_11_13 = object : Migration(11, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) = dropOutbox(db)
+        }
+
+        @VisibleForTesting
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) = dropOutbox(db)
+        }
+
+        private fun dropOutbox(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS outbox")
         }
 
         /** As Room generates them for a fresh install — see [ORGANIZATION_SCHEMA] on why verbatim. */

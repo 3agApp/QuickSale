@@ -59,6 +59,24 @@ class OrganizationRepository(private val dao: OrganizationDao) {
         locations: List<OrgLocation>,
     ) = dao.replaceAll(organizations, members, locations)
 
+    /*
+     * Write-through, for the rows the app itself changes.
+     *
+     * Everything below applies a record the store has *already accepted*, so the screen shows the
+     * change immediately instead of waiting for the next snapshot. That wait was the visible bug:
+     * add a branch and it wasn't in the branch picker; approve an account and it stayed pending
+     * until a sync that might be half an hour away, on a stand where the customer is still
+     * standing there. The next full sync remains authoritative and simply agrees.
+     */
+
+    suspend fun saveOrganization(organization: Organization) =
+        dao.insertOrganizations(listOf(organization))
+
+    suspend fun saveMember(member: Member) = dao.insertMembers(listOf(member))
+
+    /** Applies a branch, and the single-default rule that comes with it. */
+    suspend fun saveLocation(location: OrgLocation) = dao.saveLocation(location)
+
     private companion object {
         /** Enough to scroll a sheet, few enough that the answer is one glance, not a hunt. */
         const val SELLABLE_SEARCH_LIMIT = 40

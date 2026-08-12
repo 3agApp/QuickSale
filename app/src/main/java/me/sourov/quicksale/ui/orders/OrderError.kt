@@ -1,6 +1,7 @@
 package me.sourov.quicksale.ui.orders
 
 import me.sourov.quicksale.data.remote.WooApiException
+import java.io.IOException
 
 /**
  * A refusal from the store, turned into something a person at the counter can act on.
@@ -27,6 +28,22 @@ data class OrderError(
             is WooApiException -> fromApi(error)
             else -> OrderError(
                 headline = "Couldn't place the order",
+                detail = error.message.orEmpty(),
+            )
+        }
+
+        /**
+         * The same refusal, for a screen that was *reading* orders rather than placing one.
+         *
+         * Returns null when the store simply couldn't be reached: the offline banner already says
+         * so across every tab, and a modal dialog repeating it — over a list that is still showing
+         * perfectly good rows — is a tap demanded for no information.
+         */
+        fun forRead(error: Throwable): OrderError? = when (error) {
+            is WooApiException -> fromApi(error)
+            is IOException -> null
+            else -> OrderError(
+                headline = "Couldn't load orders",
                 detail = error.message.orEmpty(),
             )
         }

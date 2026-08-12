@@ -243,6 +243,8 @@ class MigrationTest {
                 QuickSaleDatabase.MIGRATION_8_9,
                 QuickSaleDatabase.MIGRATION_9_10,
                 QuickSaleDatabase.MIGRATION_10_11,
+                QuickSaleDatabase.MIGRATION_11_13,
+                QuickSaleDatabase.MIGRATION_12_13,
             )
             .build()
 

@@ -39,7 +39,7 @@ sealed interface ReviewOutcome {
  */
 class PendingApprovalViewModel(
     private val organizationId: Long,
-    repository: OrganizationRepository,
+    private val repository: OrganizationRepository,
     private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
@@ -88,6 +88,9 @@ class PendingApprovalViewModel(
                     _outcome.value = ReviewOutcome.AlreadyDecided
                     return@launch
                 }
+                // Applied locally from the row the store returned, so the list stops calling
+                // this account pending the moment it isn't — the next snapshot only confirms it.
+                change.organization?.let { repository.saveOrganization(it) }
                 val activated = if (activateMembers) activateInactiveMembers(api) else 0
                 _outcome.value = ReviewOutcome.Applied(status, activated)
             } catch (e: WooApiException) {
@@ -113,7 +116,10 @@ class PendingApprovalViewModel(
             // One member the store refuses must not undo an approval that already succeeded, so
             // each is attempted on its own and the count reports what actually landed.
             runCatching { api.setMemberStatus(organizationId, member.memberId, Member.STATUS_ACTIVE) }
-                .onSuccess { activated++ }
+                .onSuccess { updated ->
+                    repository.saveMember(updated)
+                    activated++
+                }
         }
         return activated
     }

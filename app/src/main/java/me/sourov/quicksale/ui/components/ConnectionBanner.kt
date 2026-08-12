@@ -45,13 +45,22 @@ fun ConnectionBanner(
     syncError: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    online: Boolean = true,
 ) {
-    val problem = remember(configured, syncError) {
+    val problem = remember(configured, syncError, online) {
         when {
             !configured -> Problem(
                 headline = "Store not connected",
                 detail = "Tap to add your site address and API keys.",
                 fatal = true,
+            )
+            // Worth saying because it changes what the till can do: the catalog and the accounts
+            // are on the device and keep working, but an order needs the store to accept it, so
+            // placing one now will fail rather than wait.
+            !online -> Problem(
+                headline = "Offline",
+                detail = "Scanning, searching and printing still work. Orders can't be placed.",
+                fatal = false,
             )
             syncError != null -> Problem(
                 headline = "Last sync failed",

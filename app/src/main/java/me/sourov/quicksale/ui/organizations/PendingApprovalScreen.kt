@@ -232,12 +232,9 @@ fun PendingApprovalScreen(
             onDismiss = {
                 val decided = result !is ReviewOutcome.Failed
                 viewModel.consumeOutcome()
-                // The snapshot is the only truthful copy of what the store holds, so a decision is
-                // followed by a resync rather than a local edit.
-                if (decided) {
-                    SyncManager.syncOrganizations(context)
-                    onReviewed()
-                }
+                // The decision is already applied to the local copy from the rows the store
+                // returned, so the list is correct the moment this closes — no resync needed.
+                if (decided) onReviewed()
             },
         )
     }

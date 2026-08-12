@@ -134,6 +134,28 @@ interface OrganizationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLocations(items: List<OrgLocation>)
 
+    /** Clears the default flag on every branch of an organization except [keepId]. */
+    @Query(
+        """
+        UPDATE org_locations SET isDefault = 0
+        WHERE organizationId = :organizationId AND id != :keepId
+        """
+    )
+    suspend fun clearOtherDefaults(organizationId: Long, keepId: Long)
+
+    /**
+     * Writes one branch back after the store accepted it, keeping the single-default rule.
+     *
+     * Setting a branch as default clears the flag on the others *server-side*, so applying only
+     * the row that came back would leave two locally — and the till would offer a default that no
+     * longer is one until the next full sync happened to correct it.
+     */
+    @Transaction
+    suspend fun saveLocation(location: OrgLocation) {
+        insertLocations(listOf(location))
+        if (location.isDefault) clearOtherDefaults(location.organizationId, location.id)
+    }
+
     @Query("DELETE FROM organizations")
     suspend fun clearOrganizations()
 

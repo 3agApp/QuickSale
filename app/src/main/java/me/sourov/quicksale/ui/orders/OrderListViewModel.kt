@@ -53,7 +53,7 @@ class OrderListViewModel(
                 val api = WooCommerceApi(settings)
                 _orders.value = api.fetchOrders(organizationId = organizationId).items
             } catch (e: Exception) {
-                _error.value = OrderError.from(e)
+                _error.value = OrderError.forRead(e)
             } finally {
                 _loading.value = false
             }

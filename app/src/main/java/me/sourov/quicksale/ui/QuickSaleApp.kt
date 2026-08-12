@@ -143,6 +143,9 @@ private fun QuickSaleShell(mode: DeviceMode) {
     val productsSync by SyncManager.state(SyncTarget.Products).collectAsStateWithLifecycle()
     val organizationsSync by SyncManager.state(SyncTarget.Organizations).collectAsStateWithLifecycle()
 
+    // Assumed online until the monitor says otherwise, so a cold start doesn't flash "Offline".
+    val online by container.connectivity.online.collectAsStateWithLifecycle(initialValue = true)
+
     // The tab's own sync sits in the top bar, so the list you're looking at is one tap from fresh.
     val topBarSync: (() -> Unit)? = when {
         isProducts -> { { SyncManager.syncProducts(context) } }
@@ -205,6 +208,7 @@ private fun QuickSaleShell(mode: DeviceMode) {
                         // the device has actually looked.
                         configured = settings?.isConfigured != false,
                         syncError = firstSyncError(productsSync, organizationsSync),
+                        online = online,
                         onClick = { navController.navigate(Routes.SETTINGS) },
                     )
                 }

@@ -585,6 +585,8 @@ class SellViewModel(
                     clearCart()
                     _placed.value = result
                 } catch (e: Exception) {
+                    // The cart is deliberately left intact so the operator can fix whatever the
+                    // store objected to — or simply try again — without re-scanning everything.
                     _error.value = OrderError.from(e)
                 }
             } finally {
