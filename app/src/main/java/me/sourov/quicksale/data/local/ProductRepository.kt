@@ -24,6 +24,9 @@ class ProductRepository(private val dao: ProductDao) {
      */
     suspend fun findByCode(code: String): Product? = dao.findByCode(code.trim())
 
+    /** Every product [code] matches, for callers that must not guess between two of them. */
+    suspend fun findAllByCode(code: String): List<Product> = dao.findAllByCode(code.trim())
+
     /** Updates the local copies of [products], e.g. fresh stock right after an order. */
     suspend fun upsert(products: List<Product>) = dao.upsertAll(products)
 

@@ -29,6 +29,7 @@ import me.sourov.quicksale.ui.orders.CartScreen
 import me.sourov.quicksale.ui.orders.CheckoutScreen
 import me.sourov.quicksale.ui.orders.NewOrderViewModel
 import me.sourov.quicksale.ui.orders.OrderConfirmationScreen
+import me.sourov.quicksale.ui.print.QuickPrintScreen
 import me.sourov.quicksale.ui.organizations.OrganizationDetailScreen
 import me.sourov.quicksale.ui.organizations.OrganizationsScreen
 import me.sourov.quicksale.ui.organizations.PendingApprovalScreen
@@ -213,6 +214,9 @@ fun QuickSaleNavHost(
                     navController.navigate(route)
                 },
             )
+        }
+        composable(TopLevelDestination.QUICK_PRINT.route) {
+            QuickPrintScreen()
         }
         composable(TopLevelDestination.SETTINGS.route) {
             SettingsScreen(

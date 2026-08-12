@@ -83,6 +83,23 @@ interface ProductDao {
     )
     suspend fun findByCode(code: String): Product?
 
+    /**
+     * Every product a code matches, in the same preference order as [findByCode].
+     *
+     * [findByCode] answers "what did they scan?" and picks a winner, which is right when the answer
+     * feeds a cart the operator can still see and correct. Printing a label is not that: it commits
+     * to paper straight away, so the one caller that prints unattended asks for the whole set and
+     * refuses to guess when a code turns out to name two products.
+     */
+    @Query(
+        """
+        SELECT * FROM products
+        WHERE (ean != '' AND ean = :code) OR sku = :code
+        ORDER BY CASE WHEN ean = :code THEN 0 ELSE 1 END, name COLLATE NOCASE
+        """
+    )
+    suspend fun findAllByCode(code: String): List<Product>
+
     @Query("SELECT COUNT(*) FROM products WHERE status = 'publish'")
     fun count(): Flow<Int>
 

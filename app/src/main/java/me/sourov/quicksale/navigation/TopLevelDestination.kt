@@ -4,10 +4,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Business
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Print
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -50,6 +52,18 @@ enum class TopLevelDestination(
         unselectedIcon = Icons.Outlined.Business,
         searchable = true,
         searchPlaceholder = "Search organizations",
+    ),
+
+    /**
+     * Scan-to-print shelf labels. Its own tab rather than a corner of Products because it is a
+     * different job done in a different posture — a box in one hand, working through a delivery —
+     * and it must be reachable without navigating through a list first.
+     */
+    QUICK_PRINT(
+        route = "quick_print",
+        label = "Quick print",
+        selectedIcon = Icons.Filled.Print,
+        unselectedIcon = Icons.Outlined.Print,
     ),
     SETTINGS(
         route = "settings",
