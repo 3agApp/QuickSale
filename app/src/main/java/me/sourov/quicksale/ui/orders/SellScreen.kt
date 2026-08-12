@@ -40,9 +40,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -225,11 +224,9 @@ fun SellScreen(
 /**
  * The cart's own strip: who the order is for, and how to abandon it.
  *
- * Before a customer is chosen — which is most of the time the cart is being filled — this says so
- * plainly rather than showing an empty slot, because "no customer yet" is the normal state here and
- * not something to fix before scanning.
+ * A single line — organization and, once known, the customer alongside it — rather than a full
+ * second app bar's worth of height, since the shell's own bar already sits above this one.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CartBar(
     organizationName: String?,
@@ -238,29 +235,26 @@ private fun CartBar(
     onClear: () -> Unit,
     onOpenCompany: (() -> Unit)?,
 ) {
-    TopAppBar(
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-        title = {
-            Column {
-                Text(
-                    text = organizationName ?: "New order",
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = memberName?.takeIf { it.isNotBlank() }
-                        ?: "Customer chosen at checkout",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        },
-        actions = {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = Spacing.screen, end = Spacing.xs)
+                .padding(vertical = Spacing.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val member = memberName?.takeIf { it.isNotBlank() }
+            Text(
+                text = if (member != null) {
+                    "${organizationName ?: "New order"}  ·  $member"
+                } else {
+                    organizationName ?: "New order"
+                },
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
             onOpenCompany?.let {
                 IconButton(onClick = it) {
                     Icon(
@@ -277,8 +271,8 @@ private fun CartBar(
                     )
                 }
             }
-        },
-    )
+        }
+    }
 }
 
 /** A search match to tap to add. Shared with the order-editing screen's add-product search. */

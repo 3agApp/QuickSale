@@ -1,5 +1,10 @@
 package me.sourov.quicksale.ui.products
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +27,7 @@ import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -48,6 +54,7 @@ import coil.compose.AsyncImage
 import me.sourov.quicksale.appContainer
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.sync.SyncManager
+import me.sourov.quicksale.data.sync.SyncState
 import me.sourov.quicksale.data.sync.SyncTarget
 import me.sourov.quicksale.ui.CurrencyFormatter
 import me.sourov.quicksale.ui.components.EmptyState
@@ -80,6 +87,18 @@ fun ProductsScreen(
         modifier = modifier.fillMaxSize(),
     ) {
         Column(Modifier.fillMaxSize()) {
+            AnimatedVisibility(
+                visible = syncState.isRunning,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically(),
+            ) {
+                val fraction = (syncState as? SyncState.Running)?.fraction ?: 0f
+                LinearProgressIndicator(
+                    progress = { fraction.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
             Text(
                 text = "$count ${if (count == 1) "product" else "products"}",
                 style = MaterialTheme.typography.labelMedium,
