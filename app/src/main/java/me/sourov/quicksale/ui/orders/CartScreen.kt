@@ -235,8 +235,9 @@ fun CartScreen(
     }
 }
 
+/** A search match to tap to add. Shared with the order-editing screen's add-product search. */
 @Composable
-private fun ProductResultRow(product: Product, modifier: Modifier = Modifier) {
+internal fun ProductResultRow(product: Product, modifier: Modifier = Modifier) {
     ListItem(
         modifier = modifier.fillMaxWidth(),
         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),

@@ -70,27 +70,6 @@ interface OrganizationDao {
     )
     fun observeLocations(organizationId: Long): Flow<List<OrgLocation>>
 
-    /**
-     * The one member of every organization that has exactly one, with what's needed to decide
-     * whether an order can be started for them straight away.
-     *
-     * `COUNT(*) = 1` makes the other selected columns unambiguous — they can only come from that
-     * single row — so no aggregate wrapper is needed around them.
-     */
-    @Query(
-        """
-        SELECT m.organizationId AS organizationId,
-               m.userId AS userId,
-               m.canPlaceOrders AS canPlaceOrders,
-               o.status AS organizationStatus
-        FROM org_members m
-        JOIN organizations o ON o.id = m.organizationId
-        GROUP BY m.organizationId
-        HAVING COUNT(*) = 1
-        """
-    )
-    fun observeSoleMembers(): Flow<List<SoleMember>>
-
     /** Member and location tallies for every organization, keyed by organization id. */
     @Query(
         """
@@ -142,14 +121,6 @@ interface OrganizationDao {
         insertLocations(locations)
     }
 }
-
-/** An organization's only member, and whether that member may buy right now. */
-data class SoleMember(
-    val organizationId: Long,
-    val userId: Long,
-    val canPlaceOrders: Boolean,
-    val organizationStatus: String,
-)
 
 /** How many members and locations one organization has, for the list rows. */
 data class OrganizationTally(

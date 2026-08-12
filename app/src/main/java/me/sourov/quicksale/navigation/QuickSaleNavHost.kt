@@ -29,6 +29,10 @@ import me.sourov.quicksale.ui.orders.CartScreen
 import me.sourov.quicksale.ui.orders.CheckoutScreen
 import me.sourov.quicksale.ui.orders.NewOrderViewModel
 import me.sourov.quicksale.ui.orders.OrderConfirmationScreen
+import me.sourov.quicksale.ui.orders.OrderDetailScreen
+import me.sourov.quicksale.ui.orders.OrderDetailViewModel
+import me.sourov.quicksale.ui.orders.OrderListScreen
+import me.sourov.quicksale.ui.orders.OrderListViewModel
 import me.sourov.quicksale.ui.print.QuickPrintScreen
 import me.sourov.quicksale.ui.organizations.OrganizationDetailScreen
 import me.sourov.quicksale.ui.organizations.OrganizationsScreen
@@ -55,6 +59,10 @@ object Routes {
     const val PENDING_REVIEW = "pending_review"
     fun pendingReview(id: Long) = "$PENDING_REVIEW/$id"
 
+    const val ORDER_LIST = "order_list"
+    const val ORDER_LIST_ROUTE = "$ORDER_LIST/{$ORGANIZATION_ID_ARG}"
+    fun orderList(organizationId: Long) = "$ORDER_LIST/$organizationId"
+
     const val MEMBER_USER_ID_ARG = "memberUserId"
 
     /**
@@ -75,8 +83,12 @@ object Routes {
     fun checkout(organizationId: Long, memberUserId: Long) =
         "$CHECKOUT/$organizationId/$memberUserId"
 
-    const val ORDER_CONFIRMATION = "order_confirmation"
+    const val ORDER_DETAIL = "order_detail"
     const val ORDER_ID_ARG = "orderId"
+    const val ORDER_DETAIL_ROUTE = "$ORDER_DETAIL/{$ORDER_ID_ARG}"
+    fun orderDetail(orderId: Long) = "$ORDER_DETAIL/$orderId"
+
+    const val ORDER_CONFIRMATION = "order_confirmation"
     const val ORDER_TOTAL_ARG = "total"
     const val ORDER_TAX_ARG = "tax"
     const val ORDER_SHIPPING_ARG = "shipping"
@@ -198,18 +210,13 @@ fun QuickSaleNavHost(
         composable(TopLevelDestination.ORGANIZATIONS.route) {
             OrganizationsScreen(
                 query = organizationsQuery,
-                onOrganizationClick = { organization, soleMemberUserId ->
-                    val route = when {
+                onOrganizationClick = { organization ->
+                    val route = if (organization.orgStatus == OrganizationStatus.PENDING) {
                         // An account waiting for approval isn't one you can sell to, so the tap
                         // goes to the only useful thing: reviewing it.
-                        organization.orgStatus == OrganizationStatus.PENDING ->
-                            Routes.pendingReview(organization.id)
-
-                        // An account with a single member has nothing to pick on its detail
-                        // screen, so the tap goes where it was always heading: that member's order.
-                        soleMemberUserId != null -> Routes.newOrder(organization.id, soleMemberUserId)
-
-                        else -> Routes.organizationDetail(organization.id)
+                        Routes.pendingReview(organization.id)
+                    } else {
+                        Routes.organizationDetail(organization.id)
                     }
                     navController.navigate(route)
                 },
@@ -259,6 +266,46 @@ fun QuickSaleNavHost(
                 onStartOrder = { memberUserId ->
                     navController.navigate(Routes.newOrder(id, memberUserId))
                 },
+                onViewOrders = { navController.navigate(Routes.orderList(id)) },
+            )
+        }
+        composable(
+            route = Routes.ORDER_LIST_ROUTE,
+            arguments = listOf(navArgument(Routes.ORGANIZATION_ID_ARG) { type = NavType.LongType }),
+        ) { backStackEntry ->
+            val context = LocalContext.current
+            val container = remember(context) { context.appContainer }
+            val organizationId = backStackEntry.arguments?.getLong(Routes.ORGANIZATION_ID_ARG) ?: 0L
+            val viewModel: OrderListViewModel = viewModel(
+                factory = OrderListViewModel.factory(
+                    organizationId = organizationId,
+                    organizationRepository = container.organizations,
+                    settingsRepository = container.settings,
+                ),
+            )
+            OrderListScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() },
+                onOrderClick = { orderId -> navController.navigate(Routes.orderDetail(orderId)) },
+            )
+        }
+        composable(
+            route = Routes.ORDER_DETAIL_ROUTE,
+            arguments = listOf(navArgument(Routes.ORDER_ID_ARG) { type = NavType.LongType }),
+        ) { backStackEntry ->
+            val context = LocalContext.current
+            val container = remember(context) { context.appContainer }
+            val orderId = backStackEntry.arguments?.getLong(Routes.ORDER_ID_ARG) ?: 0L
+            val viewModel: OrderDetailViewModel = viewModel(
+                factory = OrderDetailViewModel.factory(
+                    orderId = orderId,
+                    settingsRepository = container.settings,
+                    productRepository = container.products,
+                ),
+            )
+            OrderDetailScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() },
             )
         }
         composable(

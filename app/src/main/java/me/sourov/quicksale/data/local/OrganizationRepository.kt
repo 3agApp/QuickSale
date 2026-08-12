@@ -38,20 +38,6 @@ class OrganizationRepository(private val dao: OrganizationDao) {
             locations.filter { it.id in allowed }
         }
 
-    /**
-     * Organizations whose single member can be served without a stop at the detail screen, mapped
-     * to that member's user id.
-     *
-     * There is nothing to choose on the detail screen when an account has one member — picking them
-     * is the only thing it asks for. Accounts whose one member can't buy are left out: their detail
-     * screen is where the reason is explained.
-     */
-    fun soleOrderableMembers(): Flow<Map<Long, Long>> =
-        dao.observeSoleMembers().map { rows ->
-            rows.filter { it.canPlaceOrders && OrganizationStatus.fromSlug(it.organizationStatus).canTrade }
-                .associate { it.organizationId to it.userId }
-        }
-
     fun tallies(): Flow<Map<Long, OrganizationTally>> =
         dao.observeTallies().map { rows -> rows.associateBy { it.organizationId } }
 

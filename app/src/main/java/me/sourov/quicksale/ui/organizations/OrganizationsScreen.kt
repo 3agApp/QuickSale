@@ -21,7 +21,6 @@ import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.RateReview
-import androidx.compose.material.icons.outlined.ShoppingCartCheckout
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -62,15 +61,13 @@ import me.sourov.quicksale.ui.theme.Spacing
  * The status filter doubles as the review queue: **Pending** is the list of accounts waiting for
  * somebody to approve them, which is the one thing on this screen that isn't about selling.
  *
- * [onOrganizationClick] receives the whole organization — the caller routes on its status — plus the
- * only member's user id for one-member accounts, so a tap can skip the detail screen (see
- * [OrganizationsViewModel.soleMembers]).
+ * [onOrganizationClick] receives the whole organization — the caller routes on its status.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrganizationsScreen(
     query: String,
-    onOrganizationClick: (organization: Organization, soleMemberUserId: Long?) -> Unit,
+    onOrganizationClick: (organization: Organization) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -83,7 +80,6 @@ fun OrganizationsScreen(
     val organizations = viewModel.organizations.collectAsLazyPagingItems()
     val count by viewModel.matchingCount.collectAsStateWithLifecycle()
     val tallies by viewModel.tallies.collectAsStateWithLifecycle()
-    val soleMembers by viewModel.soleMembers.collectAsStateWithLifecycle()
     val statusFilter by viewModel.statusFilter.collectAsStateWithLifecycle()
     val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle()
     val syncState by SyncManager.state(SyncTarget.Organizations).collectAsStateWithLifecycle()
@@ -153,12 +149,10 @@ fun OrganizationsScreen(
                         key = organizations.itemKey { it.id },
                     ) { index ->
                         organizations[index]?.let { organization ->
-                            val soleMemberUserId = soleMembers[organization.id]
                             OrganizationRow(
                                 organization = organization,
                                 tally = tallies[organization.id],
-                                startsOrderDirectly = soleMemberUserId != null,
-                                onClick = { onOrganizationClick(organization, soleMemberUserId) },
+                                onClick = { onOrganizationClick(organization) },
                             )
                         }
                     }
@@ -221,7 +215,6 @@ private val FILTERABLE_STATUSES = listOf(
 private fun OrganizationRow(
     organization: Organization,
     tally: OrganizationTally?,
-    startsOrderDirectly: Boolean,
     onClick: () -> Unit,
 ) {
     QuickSaleCard(modifier = Modifier.clickable(onClick = onClick)) {
@@ -260,21 +253,16 @@ private fun OrganizationRow(
                 OrganizationStatusChip(organization.orgStatus)
             }
             // The row is coloured like the action it performs rather than like a step into another
-            // list: a pending account opens its review, a one-member account goes straight to its
-            // order, and everything else steps into the member list.
+            // list: a pending account opens its review, everything else steps into its detail page.
             val pending = organization.orgStatus == OrganizationStatus.PENDING
             Icon(
-                imageVector = when {
-                    pending -> Icons.Outlined.RateReview
-                    startsOrderDirectly -> Icons.Outlined.ShoppingCartCheckout
-                    else -> Icons.AutoMirrored.Filled.KeyboardArrowRight
+                imageVector = if (pending) {
+                    Icons.Outlined.RateReview
+                } else {
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight
                 },
-                contentDescription = when {
-                    pending -> "Review ${organization.name}"
-                    startsOrderDirectly -> "Start an order for ${organization.name}"
-                    else -> null
-                },
-                tint = if (pending || startsOrderDirectly) {
+                contentDescription = if (pending) "Review ${organization.name}" else null,
+                tint = if (pending) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant

@@ -212,3 +212,13 @@ fun SelectorRow(
 
 /** Formats a running total the way the store's own website writes a price. */
 fun BigDecimal.display(): String = CurrencyFormatter.format(this)
+
+/**
+ * WooCommerce's `date_created_gmt` (`2024-03-21T13:13:13`, no offset — it's already UTC) as a
+ * short, locale-formatted date for a list or detail header. Unparsable input is shown verbatim
+ * rather than blanked, since a raw stamp is still more useful than nothing.
+ */
+fun String.toOrderDateLabel(): String =
+    runCatching { java.time.LocalDateTime.parse(this) }
+        .map { it.format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy · h:mm a")) }
+        .getOrDefault(this)

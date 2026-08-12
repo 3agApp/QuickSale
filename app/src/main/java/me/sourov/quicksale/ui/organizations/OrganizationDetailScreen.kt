@@ -1,10 +1,12 @@
 package me.sourov.quicksale.ui.organizations
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -12,9 +14,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.MailOutline
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,6 +36,7 @@ import me.sourov.quicksale.data.local.Organization
 import me.sourov.quicksale.data.sync.SyncManager
 import me.sourov.quicksale.data.sync.SyncTarget
 import me.sourov.quicksale.ui.components.EmptyState
+import me.sourov.quicksale.ui.components.IconBadge
 import me.sourov.quicksale.ui.components.LoadingState
 import me.sourov.quicksale.ui.components.Monogram
 import me.sourov.quicksale.ui.components.QuickSaleCard
@@ -50,6 +55,7 @@ import me.sourov.quicksale.ui.theme.Spacing
 fun OrganizationDetailScreen(
     organizationId: Long,
     onStartOrder: (memberUserId: Long) -> Unit,
+    onViewOrders: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -91,6 +97,9 @@ fun OrganizationDetailScreen(
             syncing = syncState.isRunning,
             onSync = { SyncManager.syncOrganizations(context) },
         )
+
+        Spacer(Modifier.height(Spacing.xl))
+        OrdersRow(onClick = onViewOrders)
 
         if (current.billingFormatted.isNotBlank()) {
             Spacer(Modifier.height(Spacing.xl))
@@ -230,6 +239,36 @@ private fun OrganizationHeader(
                 text = organization.email,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Entry point into this organization's order history — every member's orders, newest first. */
+@Composable
+private fun OrdersRow(onClick: () -> Unit) {
+    QuickSaleCard(modifier = Modifier.clickable(onClick = onClick)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconBadge(icon = Icons.AutoMirrored.Outlined.ReceiptLong, size = Sizes.avatarSmall)
+            Spacer(Modifier.width(Spacing.md))
+            Column(Modifier.weight(1f)) {
+                Text("Orders", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "View and edit this account's orders",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
             )
         }
     }

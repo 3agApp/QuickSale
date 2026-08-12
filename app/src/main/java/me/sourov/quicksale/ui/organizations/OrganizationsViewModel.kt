@@ -61,13 +61,6 @@ class OrganizationsViewModel(private val repository: OrganizationRepository) : V
     val tallies: StateFlow<Map<Long, OrganizationTally>> = repository.tallies()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
-    /**
-     * Organization id → its only member's user id, for accounts a tap can take straight to a new
-     * order. Resolved with the list rather than on tap so the row can say where it leads.
-     */
-    val soleMembers: StateFlow<Map<Long, Long>> = repository.soleOrderableMembers()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
-
     fun setQuery(value: String) { _query.value = value }
 
     fun setStatusFilter(status: OrganizationStatus?) { _statusFilter.value = status }

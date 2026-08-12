@@ -76,8 +76,14 @@ class WooCommerceApi(settings: StoreSettings) {
         )
     }
 
-    /** A product line to send when creating an order. */
-    data class LineItem(val productId: Long, val quantity: Int)
+    /**
+     * A product line to send when creating or updating an order.
+     *
+     * [id] is the WooCommerce line item id and is only ever set when editing an existing order:
+     * present with a positive [quantity] it updates that line, present with `quantity = 0` it
+     * removes the line, and absent it adds a new line. Order creation never sets it.
+     */
+    data class LineItem(val productId: Long, val quantity: Int, val id: Long? = null)
 
     /** A shipping charge to attach to an order. [total] is the net (pre-tax) amount. */
     data class ShippingSelection(val methodId: String, val methodTitle: String, val total: String)
@@ -159,6 +165,7 @@ class WooCommerceApi(settings: StoreSettings) {
             put("line_items", JSONArray().apply {
                 lineItems.forEach { item ->
                     put(JSONObject().apply {
+                        item.id?.let { put("id", it) }
                         put("product_id", item.productId)
                         put("quantity", item.quantity)
                     })
@@ -187,6 +194,156 @@ class WooCommerceApi(settings: StoreSettings) {
             organizationName = order.optString("woap_organization_name").decodeHtmlEntities(),
             locationName = order.optString("woap_location_name").decodeHtmlEntities(),
         )
+    }
+
+    /** One row of an order list: enough to show and sort without fetching every line item. */
+    data class OrderSummary(
+        val id: Long,
+        val number: String,
+        val status: String,
+        val dateCreatedGmt: String,
+        val total: String,
+        val customerId: Long,
+        val organizationName: String,
+        val locationName: String,
+        val itemCount: Int,
+    )
+
+    /** One product on an order, as WooCommerce billed it — not the till's current catalog copy. */
+    data class OrderLineItem(
+        val id: Long,
+        val productId: Long,
+        val name: String,
+        val sku: String,
+        val quantity: Int,
+        val price: String,
+        val total: String,
+    )
+
+    /** A full order: its totals, stamps and every line item on it. */
+    data class OrderDetail(
+        val id: Long,
+        val number: String,
+        val status: String,
+        val dateCreatedGmt: String,
+        val customerId: Long,
+        val total: String,
+        val totalTax: String,
+        val shippingTotal: String,
+        val discountTotal: String,
+        val organizationName: String,
+        val locationName: String,
+        val lineItems: List<OrderLineItem>,
+    ) {
+        /**
+         * Whether the counter may still add or remove products.
+         *
+         * Once an order leaves `pending`/`processing` it has typically shipped, been paid out, or
+         * been cancelled/refunded — states nothing here should be re-editing after the fact.
+         */
+        val isEditable: Boolean get() = status in EDITABLE_STATUSES
+
+        private companion object {
+            val EDITABLE_STATUSES = setOf("pending", "processing")
+        }
+    }
+
+    /**
+     * Orders for one customer, newest first — the closest the store's API gets to "an
+     * organization's orders", since organizations aren't a WooCommerce customer of their own.
+     */
+    suspend fun fetchOrders(customerId: Long, page: Int, perPage: Int = 20): Page<OrderSummary> {
+        val response = http.get(
+            path = "wc/v3/orders",
+            query = mapOf(
+                "customer" to customerId.toString(),
+                "page" to page.toString(),
+                "per_page" to perPage.toString(),
+                "orderby" to "date",
+                "order" to "desc",
+            ),
+        )
+        val array = JSONArray(response.body)
+        val items = buildList(array.length()) {
+            for (i in 0 until array.length()) add(array.getJSONObject(i).toOrderSummary())
+        }
+        return Page(items, response.totalPages)
+    }
+
+    /** One order, with every line item on it. */
+    suspend fun fetchOrder(id: Long): OrderDetail =
+        JSONObject(http.get("wc/v3/orders/$id").body).toOrderDetail()
+
+    /**
+     * Adds, changes or removes products on an order still open enough to edit
+     * ([OrderDetail.isEditable]).
+     *
+     * [lineItems] is a diff, not the full order: an item with an [LineItem.id] and a positive
+     * quantity updates that line, one with an id and `quantity = 0` removes it, and one with no id
+     * adds a new line — see [LineItem]. Sending only what changed means a line nobody touched is
+     * never re-priced by a round trip through this call.
+     */
+    suspend fun updateOrderLineItems(id: Long, lineItems: List<LineItem>): OrderDetail {
+        val payload = JSONObject().put(
+            "line_items",
+            JSONArray().apply {
+                lineItems.forEach { item ->
+                    put(JSONObject().apply {
+                        item.id?.let { put("id", it) }
+                        put("product_id", item.productId)
+                        put("quantity", item.quantity)
+                    })
+                }
+            },
+        )
+        return JSONObject(http.patch("wc/v3/orders/$id", payload).body).toOrderDetail()
+    }
+
+    private fun JSONObject.toOrderSummary(): OrderSummary = OrderSummary(
+        id = optLong("id"),
+        number = optString("number"),
+        status = optString("status"),
+        dateCreatedGmt = optString("date_created_gmt"),
+        total = optString("total"),
+        customerId = optLong("customer_id"),
+        organizationName = optString("woap_organization_name").decodeHtmlEntities(),
+        locationName = optString("woap_location_name").decodeHtmlEntities(),
+        itemCount = optJSONArray("line_items")?.length() ?: 0,
+    )
+
+    private fun JSONObject.toOrderDetail(): OrderDetail = OrderDetail(
+        id = optLong("id"),
+        number = optString("number"),
+        status = optString("status"),
+        dateCreatedGmt = optString("date_created_gmt"),
+        customerId = optLong("customer_id"),
+        total = optString("total"),
+        totalTax = optString("total_tax"),
+        shippingTotal = optString("shipping_total"),
+        discountTotal = optString("discount_total"),
+        organizationName = optString("woap_organization_name").decodeHtmlEntities(),
+        locationName = optString("woap_location_name").decodeHtmlEntities(),
+        lineItems = optJSONArray("line_items").toOrderLineItems(),
+    )
+
+    private fun JSONArray?.toOrderLineItems(): List<OrderLineItem> {
+        if (this == null) return emptyList()
+        return buildList(length()) {
+            for (i in 0 until length()) {
+                val item = getJSONObject(i)
+                add(
+                    OrderLineItem(
+                        id = item.optLong("id"),
+                        productId = item.optLong("product_id"),
+                        name = item.optString("name").decodeHtmlEntities(),
+                        sku = item.optString("sku"),
+                        quantity = item.optInt("quantity"),
+                        price = item.optString("price"),
+                        total = item.optString("total"),
+                    ),
+                )
+            }
+        }
     }
 
     /**
