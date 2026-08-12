@@ -21,6 +21,12 @@ class WooCommerceApi(settings: StoreSettings) {
 
     private val http = WooHttp(settings)
 
+    /**
+     * The address images are rewritten against — see [throughSiteProxy]. Held rather than read per
+     * product: it can't change without a new [WooCommerceApi], since the connection did too.
+     */
+    private val siteUrl = settings.siteUrl
+
     data class Page<T>(val items: List<T>, val totalPages: Int)
 
     /**
@@ -468,6 +474,9 @@ class WooCommerceApi(settings: StoreSettings) {
             ?.getJSONObject(0)
             ?.optString("src")
             ?.takeIf { it.isNotBlank() }
+            // WordPress writes media URLs against the store's internal address, which on a proxied
+            // store no device can resolve. Routed here, once, so the DB holds a URL that loads.
+            ?.throughSiteProxy(siteUrl)
         val categoryNames = optJSONArray("categories").namesList("name")
         return Product(
             id = optLong("id"),

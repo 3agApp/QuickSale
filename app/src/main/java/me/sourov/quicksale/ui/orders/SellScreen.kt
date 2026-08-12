@@ -5,7 +5,9 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -26,8 +28,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.QrCodeScanner
-import androidx.compose.material.icons.outlined.RemoveShoppingCart
-import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -58,6 +58,7 @@ import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.scanner.ScannerHub
 import me.sourov.quicksale.ui.products.ProductThumbnail
 import me.sourov.quicksale.ui.products.asPrice
+import me.sourov.quicksale.ui.theme.Sizes
 import me.sourov.quicksale.ui.theme.Spacing
 
 /**
@@ -78,8 +79,6 @@ fun SellScreen(
     onCheckout: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val organization by viewModel.organization.collectAsStateWithLifecycle()
-    val member by viewModel.member.collectAsStateWithLifecycle()
     val lines by viewModel.lines.collectAsStateWithLifecycle()
     val totals by viewModel.totals.collectAsStateWithLifecycle()
     val itemCount by viewModel.itemCount.collectAsStateWithLifecycle()
@@ -89,7 +88,6 @@ fun SellScreen(
     val blocker by viewModel.blocker.collectAsStateWithLifecycle()
 
     val snackbar = remember { SnackbarHostState() }
-    var showingCompany by remember { mutableStateOf(false) }
 
     LaunchedEffect(message) {
         message?.let {
@@ -104,23 +102,11 @@ fun SellScreen(
         ScannerHub.scans.collect(viewModel::onScan)
     }
 
+    // No top bar of its own: who the order is for, the company sheet and the clear button all live
+    // in the shell's bar now. Two strips to say one thing cost 48dp of a 775dp screen, and this is
+    // the screen that can least afford it.
     Scaffold(
         modifier = modifier,
-        topBar = {
-            // Only what belongs to this cart: who it is for once that is known, and how to empty
-            // it. The app's own bar above already carries the brand and the settings gear.
-            CartBar(
-                organizationName = organization?.name,
-                memberName = member?.name?.ifBlank { member?.email.orEmpty() },
-                canClear = lines.isNotEmpty(),
-                onClear = viewModel::clearCart,
-                onOpenCompany = if (organization != null) {
-                    { showingCompany = true }
-                } else {
-                    null
-                },
-            )
-        },
         bottomBar = {
             OrderTotalsBar(
                 totals = totals,
@@ -176,7 +162,7 @@ fun SellScreen(
                 keyboardActions = KeyboardActions(onSearch = { viewModel.submitTyped() }),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = Spacing.md),
+                    .padding(top = Spacing.sm, bottom = Spacing.sm),
             )
 
             when {
@@ -208,67 +194,6 @@ fun SellScreen(
                         )
                         HorizontalDivider()
                     }
-                }
-            }
-        }
-    }
-
-    if (showingCompany) {
-        CompanySheet(
-            viewModel = viewModel,
-            onDismiss = { showingCompany = false },
-        )
-    }
-}
-
-/**
- * The cart's own strip: who the order is for, and how to abandon it.
- *
- * A single line — organization and, once known, the customer alongside it — rather than a full
- * second app bar's worth of height, since the shell's own bar already sits above this one.
- */
-@Composable
-private fun CartBar(
-    organizationName: String?,
-    memberName: String?,
-    canClear: Boolean,
-    onClear: () -> Unit,
-    onOpenCompany: (() -> Unit)?,
-) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = Spacing.screen, end = Spacing.xs)
-                .padding(vertical = Spacing.xs),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val member = memberName?.takeIf { it.isNotBlank() }
-            Text(
-                text = if (member != null) {
-                    "${organizationName ?: "New order"}  ·  $member"
-                } else {
-                    organizationName ?: "New order"
-                },
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            onOpenCompany?.let {
-                IconButton(onClick = it) {
-                    Icon(
-                        imageVector = Icons.Outlined.Storefront,
-                        contentDescription = "Company details and branches",
-                    )
-                }
-            }
-            if (canClear) {
-                IconButton(onClick = onClear) {
-                    Icon(
-                        imageVector = Icons.Outlined.RemoveShoppingCart,
-                        contentDescription = "Empty the cart",
-                    )
                 }
             }
         }
@@ -319,7 +244,12 @@ internal fun ProductResultRow(product: Product, modifier: Modifier = Modifier) {
  * The picture is not decoration: a counter running six near-identical SKUs reads a photograph far
  * faster than it reads "Bio-Vollmilch 3,8% 1L Mehrweg", and a wrongly scanned item is caught here
  * or not at all.
+ *
+ * There is no delete button. There used to be, and it made four touch targets on a 411dp row for
+ * three things you can want — and the third was already reachable, since decrementing the last one
+ * removes the line. Long-press does it outright for a line rung up ten deep.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CartLineRow(
     line: CartLine,
@@ -330,11 +260,12 @@ private fun CartLineRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = Spacing.sm),
+            .combinedClickable(onClick = {}, onLongClick = onRemove)
+            .padding(vertical = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ProductThumbnail(line.product.imageUrl, size = 48.dp)
-        Spacer(Modifier.width(Spacing.md))
+        ProductThumbnail(line.product.imageUrl, size = Sizes.thumbnail)
+        Spacer(Modifier.width(Spacing.sm))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 line.product.name,
@@ -346,10 +277,15 @@ private fun CartLineRow(
                 "${line.product.price.asPrice()} each · ${line.lineTotal.display()}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         FilledTonalIconButton(onClick = onDecrement) {
-            Icon(Icons.Filled.Remove, contentDescription = "Decrease")
+            Icon(
+                imageVector = if (line.quantity > 1) Icons.Filled.Remove else Icons.Outlined.Delete,
+                contentDescription = if (line.quantity > 1) "Decrease" else "Remove",
+            )
         }
         Text(
             line.quantity.toString(),
@@ -358,13 +294,6 @@ private fun CartLineRow(
         )
         FilledTonalIconButton(onClick = onIncrement) {
             Icon(Icons.Filled.Add, contentDescription = "Increase")
-        }
-        IconButton(onClick = onRemove) {
-            Icon(
-                Icons.Outlined.Delete,
-                contentDescription = "Remove",
-                tint = MaterialTheme.colorScheme.error,
-            )
         }
     }
 }

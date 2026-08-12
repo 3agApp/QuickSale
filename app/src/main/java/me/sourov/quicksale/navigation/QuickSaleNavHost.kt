@@ -207,6 +207,8 @@ fun QuickSaleNavHost(
     sellViewModel: SellViewModel,
     productsQuery: String,
     organizationsQuery: String,
+    creatingCustomer: Boolean,
+    onCreatingCustomerChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -241,6 +243,10 @@ fun QuickSaleNavHost(
         composable(TopLevelDestination.ACCOUNTS.route) {
             OrganizationsScreen(
                 query = organizationsQuery,
+                // Opened from the app bar, so the shell holds whether it's showing — the same
+                // arrangement as the cart's company sheet.
+                creating = creatingCustomer,
+                onCreatingChange = onCreatingCustomerChange,
                 onOrganizationClick = { organization ->
                     val route = if (organization.orgStatus == OrganizationStatus.PENDING) {
                         // An account waiting for approval isn't one you can sell to, so the tap

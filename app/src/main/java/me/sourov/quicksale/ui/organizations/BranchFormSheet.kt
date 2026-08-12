@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -89,6 +90,9 @@ fun BranchFormSheet(
     ) {
         Column(
             modifier = Modifier
+                // Save/Cancel are at the bottom of this scroll; the keyboard must push them, not
+                // cover them.
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.screen)
                 .padding(bottom = Spacing.xxl),

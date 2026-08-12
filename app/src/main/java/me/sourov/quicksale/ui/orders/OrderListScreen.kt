@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -136,7 +137,7 @@ internal fun OrderRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(Spacing.sm))
+            Spacer(Modifier.width(Spacing.sm))
             Column(horizontalAlignment = Alignment.End) {
                 OrderStatusChip(order.status)
                 Spacer(Modifier.height(Spacing.xs))

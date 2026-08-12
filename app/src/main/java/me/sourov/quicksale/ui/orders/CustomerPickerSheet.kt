@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -80,15 +82,35 @@ fun CustomerPickerSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // Searching is exactly when the keyboard is up, so the sheet has to give way to it
+                // rather than let the results run off the bottom of the screen.
+                .imePadding()
                 .padding(horizontal = Spacing.screen)
                 .padding(bottom = Spacing.lg),
         ) {
-            Text(
-                text = "Who is this order for?",
-                style = MaterialTheme.typography.titleLarge,
-            )
+            // Title and the add-someone action share a line. As a full-width button below the
+            // field it pushed the first result 166dp down — most of a keyboard-shortened sheet,
+            // spent on the rarer of the two things this sheet does.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Who is this order for?",
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { creating = true }) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(Spacing.xs))
+                    Text("New")
+                }
+            }
 
-            Spacer(Modifier.height(Spacing.md))
+            Spacer(Modifier.height(Spacing.sm))
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -99,20 +121,8 @@ fun CustomerPickerSheet(
             )
 
             Spacer(Modifier.height(Spacing.sm))
-            FilledTonalButton(
-                onClick = { creating = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(Sizes.button),
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(Spacing.sm))
-                Text("New customer")
-            }
-
-            Spacer(Modifier.height(Spacing.sm))
             if (results.isEmpty()) {
-                Box(Modifier.heightIn(min = 200.dp)) {
+                Box(Modifier.heightIn(min = 160.dp)) {
                     EmptyState(
                         icon = Icons.Filled.Groups,
                         title = if (query.isBlank()) "No customers yet" else "Nobody matches",
@@ -125,8 +135,11 @@ fun CustomerPickerSheet(
                 }
             } else {
                 LazyColumn(
-                    contentPadding = PaddingValues(bottom = Spacing.xl),
-                    modifier = Modifier.heightIn(max = 460.dp),
+                    contentPadding = PaddingValues(bottom = Spacing.md),
+                    // Whatever the sheet has left, not a fixed 460dp: with the keyboard up there
+                    // were only ~430dp of sheet to fill, so a fixed cap ran the list off the
+                    // bottom of the screen — while searching, which is when it is being read.
+                    modifier = Modifier.weight(1f, fill = false),
                 ) {
                     items(results, key = { it.member.memberId }) { customer ->
                         CustomerRow(

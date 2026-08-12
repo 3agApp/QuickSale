@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -39,6 +40,7 @@ import me.sourov.quicksale.ui.components.SectionHeader
 import me.sourov.quicksale.ui.organizations.BranchFormSheet
 import me.sourov.quicksale.ui.organizations.LocationRow
 import me.sourov.quicksale.ui.organizations.OrganizationStatusChip
+import me.sourov.quicksale.ui.theme.Sizes
 import me.sourov.quicksale.ui.theme.Spacing
 
 /**
@@ -71,12 +73,13 @@ fun CompanySheet(
     ) {
         Column(
             modifier = Modifier
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.screen)
                 .padding(bottom = Spacing.xxl),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Monogram(initials = current.initials, size = 48.dp)
+                Monogram(initials = current.initials, size = Sizes.avatar)
                 Spacer(Modifier.width(Spacing.md))
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -102,7 +105,7 @@ fun CompanySheet(
                         text = current.billingFormatted,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(Spacing.lg),
+                        modifier = Modifier.padding(Spacing.md),
                     )
                 }
             }
@@ -136,7 +139,7 @@ fun CompanySheet(
                         text = "No branches yet. Add one and every order can be sent there.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(Spacing.lg),
+                        modifier = Modifier.padding(Spacing.md),
                     )
                 }
             } else {

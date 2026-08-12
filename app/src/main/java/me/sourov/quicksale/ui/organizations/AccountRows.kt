@@ -56,7 +56,7 @@ fun MemberRow(
         },
     ) {
         Row(
-            modifier = Modifier.padding(Spacing.md),
+            modifier = Modifier.padding(Spacing.rowPadding),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Monogram(
@@ -150,7 +150,7 @@ fun LocationRow(
 ) {
     QuickSaleCard(modifier = modifier) {
         Row(
-            modifier = Modifier.padding(Spacing.md),
+            modifier = Modifier.padding(Spacing.rowPadding),
             verticalAlignment = Alignment.Top,
         ) {
             IconBadge(

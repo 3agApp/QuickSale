@@ -8,8 +8,17 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.PersonAdd
+import androidx.compose.material.icons.outlined.RemoveShoppingCart
+import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -44,8 +53,12 @@ import me.sourov.quicksale.navigation.TopLevelDestination
 import me.sourov.quicksale.navigation.navigateToTopLevel
 import me.sourov.quicksale.ui.components.ConnectionBanner
 import me.sourov.quicksale.ui.components.QuickSaleTopBar
+import me.sourov.quicksale.ui.components.TopBarTitle
 import me.sourov.quicksale.ui.onboarding.DeviceModeScreen
+import me.sourov.quicksale.ui.orders.CompanySheet
 import me.sourov.quicksale.ui.orders.SellViewModel
+import me.sourov.quicksale.ui.settings.SettingsSection
+import me.sourov.quicksale.ui.theme.Sizes
 import me.sourov.quicksale.ui.update.AppUpdatePrompt
 import me.sourov.quicksale.ui.update.AppUpdateViewModel
 
@@ -176,6 +189,26 @@ private fun QuickSaleShell(mode: DeviceMode) {
     val searchEnabled = topLevel?.searchable == true
     val showSearchField = searchEnabled && (searchActive || activeQuery.isNotEmpty())
 
+    // How many products the current search actually matched.
+    //
+    // Read here rather than in ProductsScreen because the query is the shell's — the search field
+    // lives in the bar — so the count is exact by construction, and it can take the place of the
+    // whole "2805 products" row the list used to draw under the bar.
+    val productCount by remember(productsQuery) { container.products.countMatching(productsQuery) }
+        .collectAsStateWithLifecycle(initialValue = 0)
+
+    // The cart, read here so the bar can carry it. The Sell tab's bar was a logo above a strip
+    // naming the customer; one 48dp bar now does both, which is 48dp back on the busiest screen.
+    val cartOrganization by sellViewModel.organization.collectAsStateWithLifecycle()
+    val cartMember by sellViewModel.member.collectAsStateWithLifecycle()
+    val cartLines by sellViewModel.lines.collectAsStateWithLifecycle()
+    var showingCompany by remember { mutableStateOf(false) }
+    val isSell = topLevel == TopLevelDestination.SELL
+
+    // Signing someone up. Opened from the bar on the Accounts tab, where it replaced a 56dp row
+    // that held this button and a count that disagreed with the list under a status filter.
+    var creatingCustomer by rememberSaveable { mutableStateOf(false) }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -188,6 +221,49 @@ private fun QuickSaleShell(mode: DeviceMode) {
             ) {
                 Column {
                     QuickSaleTopBar(
+                        title = {
+                            TopBarTitle(
+                                text = barTitle(
+                                    topLevel = topLevel,
+                                    route = currentRoute,
+                                    cartOrganization = cartOrganization?.name,
+                                ),
+                                detail = barDetail(
+                                    topLevel = topLevel,
+                                    productCount = productCount,
+                                    cartMember = cartMember?.name?.ifBlank { cartMember?.email },
+                                ),
+                            )
+                        },
+                        actions = {
+                            if (isAccounts) {
+                                IconButton(onClick = { creatingCustomer = true }) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.PersonAdd,
+                                        contentDescription = "New customer",
+                                    )
+                                }
+                            }
+                            // The cart's own buttons, which used to sit on a second strip below.
+                            if (isSell) {
+                                if (cartOrganization != null) {
+                                    IconButton(onClick = { showingCompany = true }) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Storefront,
+                                            contentDescription = "Company details and branches",
+                                        )
+                                    }
+                                }
+                                if (cartLines.isNotEmpty()) {
+                                    IconButton(onClick = sellViewModel::clearCart) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.RemoveShoppingCart,
+                                            contentDescription = "Empty the cart",
+                                        )
+                                    }
+                                }
+                            }
+                        },
                         showBack = topLevel == null,
                         onBack = { navController.popBackStack() },
                         searchEnabled = searchEnabled,
@@ -227,7 +303,18 @@ private fun QuickSaleShell(mode: DeviceMode) {
                 enter = slideInVertically(tween(CHROME_DURATION)) { it } + fadeIn(tween(CHROME_DURATION)),
                 exit = slideOutVertically(tween(CHROME_DURATION)) { it } + fadeOut(tween(CHROME_DURATION)),
             ) {
-                NavigationBar {
+                // 64dp of bar rather than Material's 80: a 24dp icon over an 11sp label needs no
+                // more, and the 16dp saved shows on every top-level screen.
+                //
+                // The system navigation inset is added on top rather than absorbed. `NavigationBar`
+                // consumes `navigationBars` itself, so a flat `height(64.dp)` is 64dp *including*
+                // that inset — which is invisible on the PDA (gesture navigation, no inset) and
+                // clipped the icons and labels clean off on the C6, whose three-button bar takes
+                // 30dp of it.
+                val systemNavInset = WindowInsets.navigationBars
+                    .asPaddingValues()
+                    .calculateBottomPadding()
+                NavigationBar(modifier = Modifier.height(Sizes.navBar + systemNavInset)) {
                     tabs.forEach { destination ->
                         val selected = currentDestination?.hierarchy?.any {
                             it.route == destination.route
@@ -260,8 +347,16 @@ private fun QuickSaleShell(mode: DeviceMode) {
             sellViewModel = sellViewModel,
             productsQuery = productsQuery,
             organizationsQuery = organizationsQuery,
+            creatingCustomer = creatingCustomer,
+            onCreatingCustomerChange = { creatingCustomer = it },
             modifier = Modifier.padding(innerPadding),
         )
+    }
+
+    // Opened from the bar, so it lives here rather than on the Sell screen — but only while that
+    // tab is the one on screen, or it would reappear over whatever the operator navigated to.
+    if (showingCompany && isSell) {
+        CompanySheet(viewModel = sellViewModel, onDismiss = { showingCompany = false })
     }
 
     updateState.promptRelease?.let { release ->
@@ -273,6 +368,50 @@ private fun QuickSaleShell(mode: DeviceMode) {
             onUpdateOpened = updateViewModel::dismissPrompt,
         )
     }
+}
+
+/**
+ * What the bar calls the screen it sits on.
+ *
+ * On the Sell tab it names the customer instead, because on a till "whose order is this" is the
+ * only thing worth a permanent line and getting it wrong bills the wrong company.
+ */
+private fun barTitle(
+    topLevel: TopLevelDestination?,
+    route: String?,
+    cartOrganization: String?,
+): String = when (topLevel) {
+    TopLevelDestination.SELL -> cartOrganization ?: "New order"
+    null -> stackedScreenTitle(route)
+    else -> topLevel.label
+}
+
+/** The quiet half of the title — the fact the screen would otherwise spend a row on. */
+private fun barDetail(
+    topLevel: TopLevelDestination?,
+    productCount: Int,
+    cartMember: String?,
+): String? = when (topLevel) {
+    TopLevelDestination.SELL -> cartMember?.takeIf { it.isNotBlank() }
+    TopLevelDestination.PRODUCTS -> productCount.toString()
+    else -> null
+}
+
+/**
+ * A title for the screens that are pushed on top of a tab and don't bring their own bar.
+ *
+ * A settings page can name itself from the route alone. A product or an account can't — the shell
+ * doesn't know which one — but both put the name at the top of their own content, so the bar only
+ * has to say what kind of thing you are looking at.
+ */
+private fun stackedScreenTitle(route: String?): String = when {
+    route == null -> ""
+    route == Routes.SETTINGS -> "Settings"
+    route.startsWith(Routes.SETTINGS_SECTION) ->
+        SettingsSection.fromName(route.substringAfter('/'))?.title ?: "Settings"
+    route.startsWith(Routes.PRODUCT_DETAIL) -> "Product"
+    route.startsWith(Routes.ORGANIZATION_DETAIL) -> "Account"
+    else -> ""
 }
 
 /**

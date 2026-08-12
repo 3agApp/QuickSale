@@ -32,10 +32,9 @@ class ProductsViewModel(private val repository: ProductRepository) : ViewModel()
         }
         .cachedIn(viewModelScope)
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val matchingCount: StateFlow<Int> = _query
-        .flatMapLatest { q -> repository.countMatching(q) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+    // The match count lives in the shell now — it owns the search query, because the search field
+    // is in the app bar, so it can read the count straight from the repository and show it there
+    // instead of this screen spending a row on it.
 
     /**
      * The unpublished product this query is the exact code of, when the list has nothing to show

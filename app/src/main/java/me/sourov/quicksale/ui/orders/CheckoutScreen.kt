@@ -38,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -169,6 +170,10 @@ fun CheckoutScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                // No imePadding here, deliberately. The totals bar already consumes the keyboard
+                // inset, and Scaffold measures the bar *including* it — so `padding` below carries
+                // the keyboard's height once already. Adding imePadding on top double-counts it
+                // and leaves a keyboard-sized hole under the last field.
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.screen),
@@ -182,32 +187,50 @@ fun CheckoutScreen(
             }
 
             // First, because it is the one thing the cart deliberately doesn't know and the one
-            // thing the store won't accept an order without.
+            // thing the store won't accept an order without. No "Customer" heading over it: the
+            // card names a company and a person and carries a Change button, which says what it is
+            // more plainly than a word above it did.
             Spacer(Modifier.height(Spacing.md))
-            SectionHeader(title = "Customer")
-            Spacer(Modifier.height(Spacing.sectionGap))
             CustomerSection(
                 organization = organization,
                 member = member,
                 onChoose = { showingCustomerPicker = true },
             )
 
+            // The cart the operator just left, folded away. It is a recap, not a decision, and
+            // expanded it pushed delivery and payment — the two things this page is for — a
+            // screenful down. One tap brings it back when a line needs checking.
             Spacer(Modifier.height(Spacing.sectionSpacing))
+            var showingLines by rememberSaveable { mutableStateOf(false) }
             SectionHeader(
                 title = "Order",
-                subtitle = "$itemCount ${if (itemCount == 1) "item" else "items"}",
+                subtitle = "$itemCount ${if (itemCount == 1) "item" else "items"} · " +
+                    totals.subtotal.display(),
+                trailing = {
+                    TextButton(onClick = { showingLines = !showingLines }) {
+                        Text(if (showingLines) "Hide" else "Show")
+                    }
+                },
             )
-            Spacer(Modifier.height(Spacing.sectionGap))
-            QuickSaleCard {
-                Column(Modifier.padding(Spacing.md)) {
-                    lines.forEach { line -> OrderLineSummary(line) }
+            AnimatedVisibility(
+                visible = showingLines,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically(),
+            ) {
+                QuickSaleCard(modifier = Modifier.padding(top = Spacing.sectionGap)) {
+                    Column(Modifier.padding(Spacing.md)) {
+                        lines.forEach { line -> OrderLineSummary(line) }
+                    }
                 }
             }
 
             Spacer(Modifier.height(Spacing.sectionSpacing))
             SectionHeader(
                 title = "Delivery",
-                subtitle = "${organization?.name.orEmpty()}'s billing address is applied by the store",
+                // Shortened, not dropped: this is the one place that says billing and delivery are
+                // different things here. It used to open with the company's name, which pushed it
+                // onto a second line for any account with a long one.
+                subtitle = "The billing address is applied by the store",
             )
             Spacer(Modifier.height(Spacing.sectionGap))
             DeliveryAddressSection(
@@ -304,11 +327,13 @@ private fun CustomerSection(
         return
     }
 
+    // Once it is settled this is a one-line fact with a way back, so it gets a row's padding
+    // rather than a card's — the delivery and payment below it are what still need attention.
     QuickSaleCard {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(Spacing.lg),
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Monogram(initials = organization.initials, size = Sizes.avatarSmall)

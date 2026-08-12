@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -77,7 +78,6 @@ fun ProductsScreen(
     LaunchedEffect(query) { viewModel.setQuery(query) }
 
     val products = viewModel.products.collectAsLazyPagingItems()
-    val count by viewModel.matchingCount.collectAsStateWithLifecycle()
     val unpublished by viewModel.unpublishedMatch.collectAsStateWithLifecycle()
     val syncState by SyncManager.state(SyncTarget.Products).collectAsStateWithLifecycle()
 
@@ -99,16 +99,8 @@ fun ProductsScreen(
                 )
             }
 
-            Text(
-                text = "$count ${if (count == 1) "product" else "products"}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(
-                    start = Spacing.screen,
-                    top = Spacing.md,
-                    bottom = Spacing.xs,
-                ),
-            )
+            // The match count used to be a row here; it is the top bar's subtitle now, where it
+            // costs nothing. See `barDetail` in QuickSaleApp.
 
             val refreshing = products.loadState.refresh is LoadState.Loading
             when {
@@ -137,13 +129,10 @@ fun ProductsScreen(
                     onAction = { SyncManager.syncProducts(context) },
                 )
 
+                // Dividers, not cards with gaps: 8dp between nine cards is 64dp of nothing, and
+                // the till's own cart already reads as a divided list.
                 else -> LazyColumn(
-                    contentPadding = PaddingValues(
-                        start = Spacing.screen,
-                        end = Spacing.screen,
-                        bottom = Spacing.screen,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    contentPadding = PaddingValues(bottom = Spacing.screen),
                 ) {
                     items(
                         count = products.itemCount,
@@ -151,6 +140,7 @@ fun ProductsScreen(
                     ) { index ->
                         products[index]?.let { product ->
                             ProductRow(product = product, onClick = { onProductClick(product.id) })
+                            HorizontalDivider()
                         }
                     }
                 }
@@ -159,57 +149,68 @@ fun ProductsScreen(
     }
 }
 
+/**
+ * One product, in two lines beside its picture.
+ *
+ * This used to be a card: a 64dp thumbnail beside a three-line stack — name, codes, then a stock
+ * badge on a line of its own — with 8dp of gap to the next card, which came to 88–112dp a row and
+ * about five and a half rows on screen. The name and price share the top line now and the code and
+ * stock badge share the second, which roughly doubles what a counter can see at once.
+ *
+ * The trailing chevron is gone with it. The whole row is tappable, so it said nothing, and it was
+ * forcing the price column to be two elements tall.
+ */
 @Composable
 private fun ProductRow(product: Product, onClick: () -> Unit) {
-    QuickSaleCard(modifier = Modifier.clickable(onClick = onClick)) {
-        Row(
-            modifier = Modifier.padding(Spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ProductThumbnail(product.imageUrl, size = Sizes.thumbnail)
-            Spacer(Modifier.width(Spacing.md))
-            Column(Modifier.weight(1f)) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = Spacing.screen, vertical = Spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ProductThumbnail(product.imageUrl, size = Sizes.thumbnail)
+        Spacer(Modifier.width(Spacing.md))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.Top) {
                 Text(
                     text = product.name,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                // Both codes are searchable, so both are shown — whichever the operator typed or
-                // scanned is visible on the row that came back. The EAN leads because it's the one
-                // scanners send, so the SKU is what gets clipped on a narrow screen.
-                val codes = listOfNotNull(
-                    product.ean.takeIf { it.isNotBlank() }?.let { "EAN $it" },
-                    product.sku.takeIf { it.isNotBlank() }?.let { "SKU $it" },
+                Spacer(Modifier.width(Spacing.sm))
+                Text(
+                    text = product.price.asPrice(),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
                 )
-                if (codes.isNotEmpty()) {
-                    Spacer(Modifier.height(2.dp))
+            }
+            Spacer(Modifier.height(Spacing.xs))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // The EAN only. Both codes are searchable and both used to be shown, but at this
+                // width the SKU was truncated to "SKU B507-O…" on every row — space spent saying
+                // nothing. The EAN is what scanners send, and the SKU is on the detail page.
+                val code = product.ean.takeIf { it.isNotBlank() }?.let { "EAN $it" }
+                    ?: product.sku.takeIf { it.isNotBlank() }?.let { "SKU $it" }
+                if (code != null) {
                     Text(
-                        text = codes.joinToString("  ·  "),
+                        text = code,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
+                } else {
+                    Spacer(Modifier.weight(1f))
                 }
-                Spacer(Modifier.height(Spacing.sm))
+                Spacer(Modifier.width(Spacing.sm))
                 StockBadge(product)
-            }
-            Spacer(Modifier.width(Spacing.sm))
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = product.price.asPrice(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.height(Spacing.xs))
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }

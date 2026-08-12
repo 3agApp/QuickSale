@@ -251,12 +251,12 @@ fun EmptyState(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .padding(Spacing.xxl),
+            .padding(Spacing.xl),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
             IconBadge(
                 icon = icon,

@@ -12,13 +12,16 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -37,6 +40,7 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -61,6 +65,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import me.sourov.quicksale.ui.theme.Corners
+import me.sourov.quicksale.ui.theme.Sizes
+import me.sourov.quicksale.ui.theme.Spacing
 import me.sourov.quicksale.appContainer
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.device.label.LabelRenderer
@@ -103,111 +110,110 @@ fun ProductDetailScreen(
     var showPrintSheet by remember { mutableStateOf(false) }
     val hasImage = !current.imageUrl.isNullOrBlank()
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-    ) {
-        DetailImage(
-            imageUrl = current.imageUrl,
-            onClick = { if (hasImage) showFullImage = true },
-        )
-
-        Spacer(Modifier.height(20.dp))
-        Text(
-            text = current.name,
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = current.price.asPrice(),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+    // Print label is in a bottom bar rather than at the foot of the scroll. It is the reason
+    // anyone opens this screen, and it used to sit below a 257dp hero, the name, the price, a
+    // stock badge, three detail rows, the categories and the whole description.
+    Scaffold(
+        modifier = modifier,
+        bottomBar = {
+            PrintLabelBar(
+                enabled = viewModel.hasPrinter,
+                onClick = { showPrintSheet = true },
             )
-            if (current.onSale && current.regularPrice.isNotBlank()) {
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = current.regularPrice.asPrice(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textDecoration = TextDecoration.LineThrough,
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(Spacing.screen),
+        ) {
+            // Picture, name and price on one line. Full-width at 1.6:1 the image was 257dp — a third
+            // of the screen — and on a catalog whose products have no photograph it was a third of the
+            // screen of grey box. Tapping it still opens the full-size view.
+            Row(verticalAlignment = Alignment.Top) {
+                DetailImage(
+                    imageUrl = current.imageUrl,
+                    onClick = { if (hasImage) showFullImage = true },
                 )
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-        StockBadge(current)
-
-        if (current.sku.isNotBlank()) {
-            Spacer(Modifier.height(16.dp))
-            DetailRow(label = "SKU", value = current.sku)
-        }
-
-        if (current.ean.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
-            DetailRow(label = "EAN", value = current.ean)
-        }
-
-        // Only worth a row when the store actually restricts the quantity — every other product
-        // is simply sold one at a time, which is what an absent row says.
-        if (current.minOrderQuantity > 1 || current.orderQuantityStep > 1) {
-            Spacer(Modifier.height(8.dp))
-            DetailRow(label = "Pack (VE)", value = packSizeSummary(current))
-        }
-
-        if (current.categoryList.isNotEmpty()) {
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = "Categories",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(6.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                current.categoryList.forEach { category ->
-                    AssistChip(onClick = {}, label = { Text(category, maxLines = 1) })
+                Spacer(Modifier.width(Spacing.md))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = current.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(Spacing.xs))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = current.price.asPrice(),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        if (current.onSale && current.regularPrice.isNotBlank()) {
+                            Spacer(Modifier.width(Spacing.sm))
+                            Text(
+                                text = current.regularPrice.asPrice(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textDecoration = TextDecoration.LineThrough,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(Spacing.sm))
+                    StockBadge(current)
                 }
             }
-        }
 
-        if (current.description.isNotBlank()) {
-            Spacer(Modifier.height(20.dp))
-            Text(
-                text = "Description",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(6.dp))
-            ExpandableDescription(current.description)
-        }
+            if (current.sku.isNotBlank()) {
+                Spacer(Modifier.height(Spacing.md))
+                DetailRow(label = "SKU", value = current.sku)
+            }
 
-        Spacer(Modifier.height(28.dp))
-        Button(
-            onClick = { showPrintSheet = true },
-            enabled = viewModel.hasPrinter,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-        ) {
-            Icon(Icons.Outlined.QrCode2, contentDescription = null)
-            Spacer(Modifier.width(10.dp))
-            Text("Print label")
-        }
-        if (!viewModel.hasPrinter) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "This device has no printer.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (current.ean.isNotBlank()) {
+                Spacer(Modifier.height(Spacing.xs))
+                DetailRow(label = "EAN", value = current.ean)
+            }
+
+            // Only worth a row when the store actually restricts the quantity — every other product
+            // is simply sold one at a time, which is what an absent row says.
+            if (current.minOrderQuantity > 1 || current.orderQuantityStep > 1) {
+                Spacer(Modifier.height(Spacing.xs))
+                DetailRow(label = "Pack (VE)", value = packSizeSummary(current))
+            }
+
+            if (current.categoryList.isNotEmpty()) {
+                Spacer(Modifier.height(Spacing.md))
+                Text(
+                    text = "Categories",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(Spacing.xs))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    current.categoryList.forEach { category ->
+                        AssistChip(onClick = {}, label = { Text(category, maxLines = 1) })
+                    }
+                }
+            }
+
+            if (current.description.isNotBlank()) {
+                Spacer(Modifier.height(Spacing.md))
+                Text(
+                    text = "Description",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(Spacing.xs))
+                ExpandableDescription(current.description)
+            }
+
+            Spacer(Modifier.height(Spacing.lg))
         }
     }
 
@@ -226,6 +232,38 @@ fun ProductDetailScreen(
                 showPrintSheet = false
             },
         )
+    }
+}
+
+/** The one action this screen exists for, kept in reach of the thumb at any scroll position. */
+@Composable
+private fun PrintLabelBar(enabled: Boolean, onClick: () -> Unit) {
+    Surface(shadowElevation = 8.dp) {
+        Column(
+            modifier = Modifier
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(Spacing.screen),
+        ) {
+            Button(
+                onClick = onClick,
+                enabled = enabled,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(Sizes.button),
+            ) {
+                Icon(Icons.Outlined.QrCode2, contentDescription = null)
+                Spacer(Modifier.width(Spacing.sm))
+                Text("Print label")
+            }
+            if (!enabled) {
+                Spacer(Modifier.height(Spacing.xs))
+                Text(
+                    text = "This device has no printer.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
@@ -254,9 +292,10 @@ private fun LabelPrintSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .imePadding()
+                .padding(horizontal = Spacing.lg)
+                .padding(bottom = Spacing.xl),
+            verticalArrangement = Arrangement.spacedBy(Spacing.lg),
         ) {
             Text(
                 text = "Print label",
@@ -406,14 +445,20 @@ private fun ExpandableDescription(description: String) {
 
 private const val COLLAPSED_DESCRIPTION_LINES = 4
 
+/**
+ * The product's picture, at a size that leaves room for the rest of the page.
+ *
+ * It was full-width at 1.6:1 — 257dp on these handhelds, a third of the screen, and grey for every
+ * product whose store carries no photograph. A square thumbnail beside the name says the same thing
+ * about whether there is a picture, and tapping it still opens the full-size zoomable view.
+ */
 @Composable
 private fun DetailImage(imageUrl: String?, onClick: () -> Unit) {
     val hasImage = !imageUrl.isNullOrBlank()
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1.6f)
-            .clip(RoundedCornerShape(20.dp))
+            .size(DETAIL_IMAGE_SIZE)
+            .clip(RoundedCornerShape(Corners.card))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .then(if (hasImage) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
@@ -422,7 +467,7 @@ private fun DetailImage(imageUrl: String?, onClick: () -> Unit) {
             imageVector = Icons.Filled.Inventory2,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(64.dp),
+            modifier = Modifier.size(DETAIL_IMAGE_SIZE * 0.4f),
         )
         if (hasImage) {
             AsyncImage(
@@ -434,21 +479,23 @@ private fun DetailImage(imageUrl: String?, onClick: () -> Unit) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(10.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .padding(Spacing.xs)
+                    .clip(RoundedCornerShape(Corners.badge))
                     .background(Color.Black.copy(alpha = 0.5f))
-                    .padding(6.dp),
+                    .padding(2.dp),
             ) {
                 Icon(
                     imageVector = Icons.Outlined.ZoomOutMap,
                     contentDescription = "Zoom",
                     tint = Color.White,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(14.dp),
                 )
             }
         }
     }
 }
+
+private val DETAIL_IMAGE_SIZE = 96.dp
 
 @Composable
 private fun DetailRow(label: String, value: String) {

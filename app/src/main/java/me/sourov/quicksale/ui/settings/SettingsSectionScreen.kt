@@ -3,6 +3,7 @@ package me.sourov.quicksale.ui.settings
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -36,6 +37,9 @@ fun SettingsSectionScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            // Store connection puts the site URL and both API keys near the bottom of this scroll,
+            // which is where the keyboard would otherwise land.
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(Spacing.screen),
     ) {

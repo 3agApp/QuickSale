@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -106,6 +107,7 @@ fun QuickPrintScreen(modifier: Modifier = Modifier) {
     // folded away: the status is what this screen is for and it should own the screen.
     var showControls by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
+    var showTypedCode by remember { mutableStateOf(false) }
 
     // Only while this tab is actually on screen — see the note on the function.
     LaunchedEffect(Unit) {
@@ -115,6 +117,8 @@ fun QuickPrintScreen(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxSize()
+            // The typed-code field sits low on this page; the keyboard must push it into view.
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(Spacing.screen),
     ) {
@@ -151,7 +155,7 @@ fun QuickPrintScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        Spacer(Modifier.height(Spacing.lg))
+        Spacer(Modifier.height(Spacing.sm))
         SettingsDisclosure(
             summary = settingsSummary(settings),
             expanded = showControls,
@@ -195,24 +199,30 @@ fun QuickPrintScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        Spacer(Modifier.height(Spacing.lg))
-        OutlinedTextField(
-            value = typedCode,
-            onValueChange = { typedCode = it },
-            label = { Text("Or type a code") },
-            placeholder = { Text("EAN or SKU") },
-            leadingIcon = { Icon(Icons.Outlined.QrCodeScanner, contentDescription = null) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(
-                onSend = {
-                    viewModel.onCode(typedCode)
-                    typedCode = ""
-                },
-            ),
-            supportingText = { Text("For a barcode too damaged to scan") },
-            modifier = Modifier.fillMaxWidth(),
-        )
+        // Folded away, like the controls above it. A 56dp field plus its "For a barcode too
+        // damaged to scan" caption is ~80dp standing permanently between the status card and the
+        // tally, for the rarest thing this screen does — the scanner is the point of the device.
+        Spacer(Modifier.height(Spacing.sm))
+        if (showTypedCode) {
+            OutlinedTextField(
+                value = typedCode,
+                onValueChange = { typedCode = it },
+                label = { Text("Code of a barcode too damaged to scan") },
+                placeholder = { Text("EAN or SKU") },
+                leadingIcon = { Icon(Icons.Outlined.QrCodeScanner, contentDescription = null) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        viewModel.onCode(typedCode)
+                        typedCode = ""
+                    },
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            TextButton(onClick = { showTypedCode = true }) { Text("Type a code instead") }
+        }
 
         if (history.isNotEmpty()) {
             Spacer(Modifier.height(Spacing.sectionSpacing))
@@ -385,7 +395,7 @@ private fun Banner(
     actions: (@Composable () -> Unit)? = null,
 ) {
     QuickSaleCard(containerColor = container) {
-        Column(Modifier.padding(Spacing.lg)) {
+        Column(Modifier.padding(Spacing.md)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (busy) {
                     CircularProgressIndicator(

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -97,6 +98,9 @@ fun NewCustomerSheet(
     ) {
         Column(
             modifier = Modifier
+                // The form's own Save/Cancel sit at the bottom of this scroll, and without this
+                // the keyboard that fills the fields also hides the button that commits them.
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.screen)
                 .padding(bottom = Spacing.xxl),

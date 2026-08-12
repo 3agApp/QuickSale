@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.sourov.quicksale.ui.components.IconBadge
+import me.sourov.quicksale.ui.components.QuickSaleBrandLockup
 import me.sourov.quicksale.ui.components.QuickSaleCard
 import me.sourov.quicksale.ui.theme.Sizes
 import me.sourov.quicksale.ui.theme.Spacing
@@ -42,6 +43,12 @@ fun SettingsScreen(
         contentPadding = PaddingValues(Spacing.screen),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
+        // The wordmark's home now that it has left the app bar. This is one of the two screens
+        // where "what app is this, and which build" is a real question rather than decoration —
+        // the other being first-run device setup — and it is visited a handful of times per fair.
+        item(key = "brand") {
+            QuickSaleBrandLockup(modifier = Modifier.padding(bottom = Spacing.sm))
+        }
         items(SettingsSection.entries.size) { index ->
             val section = SettingsSection.entries[index]
             SettingsRow(section = section, onClick = { onSectionClick(section) })
@@ -53,7 +60,7 @@ fun SettingsScreen(
 private fun SettingsRow(section: SettingsSection, onClick: () -> Unit) {
     QuickSaleCard(modifier = Modifier.clickable(onClick = onClick)) {
         Row(
-            modifier = Modifier.padding(Spacing.md),
+            modifier = Modifier.padding(Spacing.rowPadding),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconBadge(

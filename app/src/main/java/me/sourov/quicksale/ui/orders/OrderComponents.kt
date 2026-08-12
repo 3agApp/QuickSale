@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,6 +37,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import me.sourov.quicksale.ui.CurrencyFormatter
 import me.sourov.quicksale.ui.components.QuickSaleCard
@@ -43,6 +47,9 @@ import me.sourov.quicksale.ui.theme.Spacing
 import java.math.BigDecimal
 
 /** Pieces the cart and the checkout both use, so the two pages read as one flow. */
+
+/** How wide the totals bar's action may grow before the total starts losing room. */
+private val ACTION_MAX_WIDTH = 180.dp
 
 /**
  * The persistent totals bar. Always visible, so the price is never a surprise.
@@ -81,43 +88,48 @@ fun OrderTotalsBar(
                     )
                 }
             }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = Spacing.md),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = if (showBreakdown) {
-                        "Total ($itemCount ${if (itemCount == 1) "item" else "items"})"
-                    } else {
-                        "$itemCount ${if (itemCount == 1) "item" else "items"}"
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    text = if (showBreakdown) totals.total.display() else totals.subtotal.display(),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Button(
-                onClick = onAction,
-                enabled = enabled && !busy,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(Sizes.button),
-            ) {
-                if (busy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
+            // Total and action share a line rather than stacking. Stacked they cost ~38dp above a
+            // full-width button, on the one screen — the till — that has the least to spare.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "$itemCount ${if (itemCount == 1) "item" else "items"}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else {
-                    // The button says why it's unavailable rather than just being greyed out.
-                    Text(actionLabel)
+                    Text(
+                        text = if (showBreakdown) {
+                            totals.total.display()
+                        } else {
+                            totals.subtotal.display()
+                        },
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.width(Spacing.md))
+                Button(
+                    onClick = onAction,
+                    enabled = enabled && !busy,
+                    // Capped rather than free: the label doubles as the refusal message
+                    // ("Choose a customer first"), and an unbounded one would eat the total.
+                    modifier = Modifier
+                        .widthIn(max = ACTION_MAX_WIDTH)
+                        .heightIn(min = Sizes.button),
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    } else {
+                        // The button says why it's unavailable rather than just being greyed out.
+                        Text(actionLabel, maxLines = 2, textAlign = TextAlign.Center)
+                    }
                 }
             }
         }

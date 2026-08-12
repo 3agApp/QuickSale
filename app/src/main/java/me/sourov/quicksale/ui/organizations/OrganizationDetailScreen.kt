@@ -115,7 +115,7 @@ fun OrganizationDetailScreen(
                     text = current.billingFormatted,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(Spacing.lg),
+                    modifier = Modifier.padding(Spacing.md),
                 )
             }
         }
@@ -132,7 +132,7 @@ fun OrganizationDetailScreen(
                     text = "No members on this account.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(Spacing.lg),
+                    modifier = Modifier.padding(Spacing.md),
                 )
             }
         } else {
@@ -163,7 +163,7 @@ fun OrganizationDetailScreen(
                     text = "No saved branches.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(Spacing.lg),
+                    modifier = Modifier.padding(Spacing.md),
                 )
             }
         } else {
@@ -183,7 +183,7 @@ private fun OrganizationHeader(
     onSync: () -> Unit,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Monogram(initials = organization.initials, size = 56.dp)
+        Monogram(initials = organization.initials, size = 48.dp)
         Spacer(Modifier.width(Spacing.md))
         Column(Modifier.weight(1f)) {
             Text(
@@ -205,7 +205,7 @@ private fun OrganizationHeader(
         Spacer(Modifier.height(Spacing.lg))
         QuickSaleCard(containerColor = MaterialTheme.colorScheme.errorContainer) {
             Row(
-                modifier = Modifier.padding(Spacing.lg),
+                modifier = Modifier.padding(Spacing.md),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
@@ -251,7 +251,7 @@ private fun OrdersRow(onClick: () -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(Spacing.lg),
+                .padding(Spacing.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconBadge(icon = Icons.AutoMirrored.Outlined.ReceiptLong, size = Sizes.avatarSmall)

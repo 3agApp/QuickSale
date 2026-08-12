@@ -45,10 +45,8 @@ class OrganizationsViewModel(private val repository: OrganizationRepository) : V
         }
         .cachedIn(viewModelScope)
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val matchingCount: StateFlow<Int> = criteria
-        .flatMapLatest { (query, status) -> repository.countMatching(query, status) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+    // No match count: the list dropped the row that showed it. The number that matters on
+    // this screen — how many accounts are waiting for review — is [pendingCount], on its chip.
 
     /**
      * How many accounts are waiting to be reviewed. Shown on the Pending chip so the queue is

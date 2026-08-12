@@ -248,10 +248,10 @@ fun PendingApprovalScreen(
 private fun ApplicantCard(member: Member) {
     QuickSaleCard {
         Row(
-            modifier = Modifier.padding(Spacing.lg),
+            modifier = Modifier.padding(Spacing.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Monogram(initials = member.initials, size = 48.dp)
+            Monogram(initials = member.initials, size = Sizes.avatar)
             Spacer(Modifier.width(Spacing.md))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -296,11 +296,11 @@ private fun ApplicantCard(member: Member) {
 @Composable
 private fun CompanyCard(organization: Organization) {
     QuickSaleCard {
-        Column(Modifier.padding(Spacing.lg)) {
+        Column(Modifier.padding(Spacing.md)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Monogram(
                     initials = organization.initials,
-                    size = 44.dp,
+                    size = Sizes.avatar,
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
