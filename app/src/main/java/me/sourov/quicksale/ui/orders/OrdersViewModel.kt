@@ -13,18 +13,22 @@ import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.data.settings.SettingsRepository
 
 /**
- * An organization's orders, newest first.
+ * Every order the store has taken, newest first.
  *
- * Read through the accounts plugin's `woap_organization` filter — one request for the account,
- * rather than one per member merged together. The old fan-out also lost orders whose member had
- * since been removed from the account, because there was no longer anyone to ask about them.
+ * This is the owner's question at a fair — "what have we sold today" — which previously had no
+ * screen at all: orders were reachable only by opening an account first, so nobody could see the
+ * day's takings without already knowing whose they were.
  */
-class OrderListViewModel(
-    private val organizationId: Long,
+class OrdersViewModel(
     private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     private val _orders = MutableStateFlow<List<WooCommerceApi.OrderSummary>>(emptyList())
+
+    private val _filter = MutableStateFlow(OrderFilter.ALL)
+    val filter: StateFlow<OrderFilter> = _filter.asStateFlow()
+
+    /** The rows to draw, already narrowed by the chosen filter. */
     val orders: StateFlow<List<WooCommerceApi.OrderSummary>> = _orders.asStateFlow()
 
     private val _loading = MutableStateFlow(false)
@@ -36,6 +40,8 @@ class OrderListViewModel(
     init {
         refresh()
     }
+
+    fun setFilter(value: OrderFilter) { _filter.value = value }
 
     fun refresh() {
         if (_loading.value) return
@@ -50,8 +56,7 @@ class OrderListViewModel(
                     )
                     return@launch
                 }
-                val api = WooCommerceApi(settings)
-                _orders.value = api.fetchOrders(organizationId = organizationId).items
+                _orders.value = WooCommerceApi(settings).fetchOrders(perPage = PAGE_SIZE).items
             } catch (e: Exception) {
                 _error.value = OrderError.from(e)
             } finally {
@@ -63,11 +68,31 @@ class OrderListViewModel(
     fun consumeError() { _error.value = null }
 
     companion object {
-        fun factory(
-            organizationId: Long,
-            settingsRepository: SettingsRepository,
-        ) = viewModelFactory {
-            initializer { OrderListViewModel(organizationId, settingsRepository) }
+        /** One page is a fair's worth of orders; the list is a feed, not an archive. */
+        private const val PAGE_SIZE = 50
+
+        fun factory(settingsRepository: SettingsRepository) = viewModelFactory {
+            initializer { OrdersViewModel(settingsRepository) }
         }
     }
+}
+
+/** The narrowing offered above the order feed. */
+enum class OrderFilter(val label: String) {
+    ALL("All"),
+    TODAY("Today"),
+    PROCESSING("Processing"),
+    PENDING("Pending"),
+    COMPLETED("Completed"),
+    ;
+
+    /** Whether [order] belongs in this filter, judged against the device's own calendar day. */
+    fun matches(order: WooCommerceApi.OrderSummary, today: java.time.LocalDate): Boolean =
+        when (this) {
+            ALL -> true
+            TODAY -> order.dateCreatedGmt.toOrderLocalDate() == today
+            PROCESSING -> order.status == "processing"
+            PENDING -> order.status == "pending"
+            COMPLETED -> order.status == "completed"
+        }
 }

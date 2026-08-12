@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import me.sourov.quicksale.data.local.CartCustomerRecord
+import me.sourov.quicksale.data.local.CartLineRecord
+import me.sourov.quicksale.data.local.CartRepository
 import me.sourov.quicksale.data.local.Member
 import me.sourov.quicksale.data.local.OrgLocation
 import me.sourov.quicksale.data.local.Organization
@@ -59,7 +62,7 @@ data class CartLine(val product: Product, val quantity: Int) {
  * There is one address form, not a choice between a saved branch and a typed address. Picking a
  * branch *fills* the form; the operator may then correct a house number without that correction
  * being written back to the branch. What the request carries follows from whether anything was
- * corrected — see [NewOrderViewModel.destination].
+ * corrected — see [SellViewModel.destination].
  */
 data class DeliveryState(
     /** False for a walk-out sale: no location, no shipping lines, stamped with location `0`. */
@@ -105,21 +108,49 @@ sealed interface PlaceResult {
  */
 data class PlaceBlocker(val reason: String, val fatal: Boolean)
 
-class NewOrderViewModel(
-    private val organizationId: Long,
-    private val memberUserId: Long,
-    organizationRepository: OrganizationRepository,
+/** Who an order is for: one member of one organization. Null until the operator picks one. */
+data class Customer(val organizationId: Long, val memberUserId: Long)
+
+/**
+ * The till: a standing cart that scans products first and learns who they are for later.
+ *
+ * The customer is state, not a constructor argument, because at a fair the visitor is standing at
+ * the product — the scan has to happen before anyone has typed a company name. WooCommerce only
+ * needs a `customer_id` when the order is *created*, so attaching it at checkout keeps the store's
+ * B2B rule intact while removing five taps from the front of the job.
+ *
+ * One instance is scoped to the Sell tab and shared with the checkout page, so the cart survives
+ * the hop to checkout and the trip back to add the thing the customer remembered at the till.
+ */
+class SellViewModel(
+    private val organizationRepository: OrganizationRepository,
     private val productRepository: ProductRepository,
+    private val cartRepository: CartRepository,
     private val settingsRepository: SettingsRepository,
     private val orderSettingsRepository: OrderSettingsRepository,
     checkoutConfigRepository: CheckoutConfigRepository,
     addressFormRepository: AddressFormRepository,
 ) : ViewModel() {
 
-    val organization: StateFlow<Organization?> = organizationRepository.organization(organizationId)
+    private val _customer = MutableStateFlow<Customer?>(null)
+    val customer: StateFlow<Customer?> = _customer.asStateFlow()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val organization: StateFlow<Organization?> = _customer
+        .flatMapLatest { who ->
+            if (who == null) flowOf(null) else organizationRepository.organization(who.organizationId)
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val member: StateFlow<Member?> = organizationRepository.member(organizationId, memberUserId)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val member: StateFlow<Member?> = _customer
+        .flatMapLatest { who ->
+            if (who == null) {
+                flowOf(null)
+            } else {
+                organizationRepository.member(who.organizationId, who.memberUserId)
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Only the branches this member is allowed to choose, default first. */
@@ -136,9 +167,12 @@ class NewOrderViewModel(
      * `location_access` limits what a member may *choose*, not what the company owns — so the
      * company sheet, which is a view of the account rather than of this order, shows all of them.
      */
-    val allLocations: StateFlow<List<OrgLocation>> =
-        organizationRepository.locations(organizationId)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val allLocations: StateFlow<List<OrgLocation>> = _customer
+        .flatMapLatest { who ->
+            if (who == null) flowOf(emptyList()) else organizationRepository.locations(who.organizationId)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val checkout: StateFlow<CheckoutConfig> = checkoutConfigRepository.config
         .stateIn(viewModelScope, SharingStarted.Eagerly, CheckoutConfig())
@@ -217,12 +251,13 @@ class NewOrderViewModel(
 
     /** Who this order is for and what's in it — grouped so [blocker] stays a typed combine. */
     private data class Buyer(
+        val customer: Customer?,
         val organization: Organization?,
         val member: Member?,
         val lines: List<CartLine>,
     )
 
-    private val buyer = combine(organization, member, _lines, ::Buyer)
+    private val buyer = combine(_customer, organization, member, _lines, ::Buyer)
 
     /** Why the order can't be placed yet, or null when it can. */
     val blocker: StateFlow<PlaceBlocker?> = combine(
@@ -233,6 +268,7 @@ class NewOrderViewModel(
         addressFields,
     ) { who, deliveryEnabled, shipping, missing, fields ->
         placeBlocker(
+            customer = who.customer,
             organization = who.organization,
             member = who.member,
             lines = who.lines,
@@ -264,17 +300,44 @@ class NewOrderViewModel(
     val placed: StateFlow<PlaceResult?> = _placed.asStateFlow()
 
     init {
-        // Hardware scans (broadcast intents OR keyboard/HID, per Settings) all arrive via ScannerHub,
-        // independent of which field is focused. Add the scanned product straight to the order.
+        // Bring back whatever was in the cart when the app was last killed, before anything else
+        // touches it. Quantities are restored as stored; everything else about each product comes
+        // from the catalog as it is now.
         viewModelScope.launch {
-            ScannerHub.scans.collect { code -> handleCode(code.trim()) }
+            val (storedLines, storedCustomer) = cartRepository.load()
+            if (storedLines.isNotEmpty() || storedCustomer != null) {
+                val restored = storedLines.mapNotNull { record ->
+                    // A product deleted from the store since the scan simply drops out of the
+                    // cart — it can no longer be ordered, and carrying it would only fail at
+                    // Place order.
+                    productRepository.byId(record.productId)?.let { CartLine(it, record.quantity) }
+                }
+                // Only fill an untouched cart: the operator may have scanned something in the
+                // moment between the screen appearing and this read returning, and that scan is
+                // the newer intent.
+                if (_lines.value.isEmpty()) _lines.value = restored
+                if (_customer.value == null && storedCustomer?.organizationId != null &&
+                    storedCustomer.memberUserId != null
+                ) {
+                    _customer.value =
+                        Customer(storedCustomer.organizationId, storedCustomer.memberUserId)
+                }
+            }
+            // Started unconditionally, and only once the read above has returned: skipping it when
+            // there was nothing to restore is what left the very first cart unsaved.
+            persistOnChange()
         }
+
         // Fill the delivery form from the member's default branch, so the common case needs no
         // taps at all: the address is already the one this order was always going to.
+        //
+        // Collected rather than awaited once, because the customer can now change mid-cart — when
+        // it does, the branch held here belongs to the previous account and has to be replaced.
         viewModelScope.launch {
-            val available = locations.first { it.isNotEmpty() }
-            if (_branchId.value == null) {
-                selectBranch((available.firstOrNull { it.isDefault } ?: available.first()).id)
+            locations.collect { available ->
+                if (available.isNotEmpty() && available.none { it.id == _branchId.value }) {
+                    selectBranch((available.firstOrNull { it.isDefault } ?: available.first()).id)
+                }
             }
         }
         // An account with no branches still needs a form; start it on the shop's own base country.
@@ -284,7 +347,29 @@ class NewOrderViewModel(
         }
     }
 
+    /**
+     * Attaches this cart to a member of an organization, or detaches it when [customer] is null.
+     *
+     * The delivery form is cleared rather than carried over: the previous account's branch is not a
+     * plausible default for this one, and a stale address silently attached to the wrong company is
+     * exactly the mistake that survives all the way to a delivery van.
+     */
+    fun selectCustomer(customer: Customer?) {
+        if (_customer.value == customer) return
+        _customer.value = customer
+        _branchId.value = null
+        _addressValues.value = emptyMap()
+        _addressCountry.value = addressForms.value.defaultCountry
+    }
+
     fun onQueryChange(value: String) { _query.value = value }
+
+    /** Empties the cart. The customer, if one was chosen, is dropped with it. */
+    fun clearCart() {
+        _lines.value = emptyList()
+        _query.value = ""
+        selectCustomer(null)
+    }
 
     fun selectGateway(gateway: PaymentGateway) { _gatewayChoice.value = gateway }
 
@@ -361,6 +446,47 @@ class NewOrderViewModel(
         val code = _query.value.trim()
         if (code.isEmpty()) return
         viewModelScope.launch { handleCode(code) }
+    }
+
+    /**
+     * Mirrors every later change to the cart onto disk.
+     *
+     * Started only after the restore above has finished, so an empty starting state can never be
+     * written over a cart that is still being read back.
+     */
+    private fun persistOnChange() {
+        viewModelScope.launch {
+            combine(_lines, _customer) { lines, who -> lines to who }
+                .collect { (lines, who) ->
+                    cartRepository.save(
+                        lines = lines.mapIndexed { index, line ->
+                            CartLineRecord(
+                                productId = line.product.id,
+                                quantity = line.quantity,
+                                // The list is already in scan order; the index preserves it.
+                                addedAtMillis = index.toLong(),
+                            )
+                        },
+                        customer = who?.let {
+                            CartCustomerRecord(
+                                organizationId = it.organizationId,
+                                memberUserId = it.memberUserId,
+                            )
+                        },
+                    )
+                }
+        }
+    }
+
+    /**
+     * A hardware scan, from the Sell screen only.
+     *
+     * Collected by the composable rather than here, because this view model outlives the tab: a
+     * subscription in `init` would keep ringing products into the cart while the operator was on
+     * the Print tab printing labels, or on Products looking something up.
+     */
+    fun onScan(code: String) {
+        viewModelScope.launch { handleCode(code.trim()) }
     }
 
     /**
@@ -441,7 +567,9 @@ class NewOrderViewModel(
                         couponCode = _couponCode.value,
                     )
                     refreshOrderedProducts(api, current)
-                    _placed.value = PlaceResult.Placed(
+                    // Read the fallback names off the cart before emptying it — clearing detaches
+                    // the customer, and the confirmation still has to say who the order was for.
+                    val result = PlaceResult.Placed(
                         remoteId = order.id,
                         total = order.total,
                         totalTax = order.totalTax,
@@ -451,6 +579,11 @@ class NewOrderViewModel(
                             .ifBlank { organization.value?.name.orEmpty() },
                         locationName = order.locationName.ifBlank { chosenLocationName() },
                     )
+                    // The cart used to die with its back-stack entry; this one lives on the Sell
+                    // tab, so it has to be emptied here or the next customer walks up to the last
+                    // customer's order still on screen — one tap from being sold twice.
+                    clearCart()
+                    _placed.value = result
                 } catch (e: Exception) {
                     _error.value = OrderError.from(e)
                 }
@@ -494,6 +627,7 @@ class NewOrderViewModel(
     }
 
     private fun placeBlocker(
+        customer: Customer?,
         organization: Organization?,
         member: Member?,
         lines: List<CartLine>,
@@ -502,6 +636,10 @@ class NewOrderViewModel(
         missingFields: List<String>,
         addressFieldCount: Int,
     ): PlaceBlocker? {
+        if (lines.isEmpty()) return PlaceBlocker("Add at least one product", false)
+        // No customer yet is the normal state of a cart being filled, not a fault. It stops the
+        // order being placed and nothing else — the scanning half of the screen stays live.
+        if (customer == null) return PlaceBlocker("Choose who this order is for", false)
         if (organization == null || member == null) return PlaceBlocker("Loading this account…", false)
         if (!organization.orgStatus.canTrade) {
             return PlaceBlocker(
@@ -513,7 +651,6 @@ class NewOrderViewModel(
         if (!member.canPlaceOrders) {
             return PlaceBlocker("${member.name} isn't allowed to place orders", fatal = true)
         }
-        if (lines.isEmpty()) return PlaceBlocker("Add at least one product", false)
         // WooCommerce decides an order "needs delivery" from its shipping lines, not its products.
         if (shipping != null && !deliveryEnabled) {
             return PlaceBlocker("Turn on delivery — this order is being shipped", false)
@@ -562,6 +699,14 @@ class NewOrderViewModel(
 
     fun consumeError() { _error.value = null }
 
+    /**
+     * Clears the placed-order result once the confirmation has been navigated to.
+     *
+     * The view model outlives the order now, so a result left standing would send the *next* trip
+     * to the checkout straight back to the last order's confirmation screen.
+     */
+    fun consumePlaced() { _placed.value = null }
+
     private fun previewTotals(
         lines: List<CartLine>,
         shipping: ShippingOption?,
@@ -598,21 +743,19 @@ class NewOrderViewModel(
 
     companion object {
         fun factory(
-            organizationId: Long,
-            memberUserId: Long,
             organizationRepository: OrganizationRepository,
             productRepository: ProductRepository,
+            cartRepository: CartRepository,
             settingsRepository: SettingsRepository,
             orderSettingsRepository: OrderSettingsRepository,
             checkoutConfigRepository: CheckoutConfigRepository,
             addressFormRepository: AddressFormRepository,
         ) = viewModelFactory {
             initializer {
-                NewOrderViewModel(
-                    organizationId = organizationId,
-                    memberUserId = memberUserId,
+                SellViewModel(
                     organizationRepository = organizationRepository,
                     productRepository = productRepository,
+                    cartRepository = cartRepository,
                     settingsRepository = settingsRepository,
                     orderSettingsRepository = orderSettingsRepository,
                     checkoutConfigRepository = checkoutConfigRepository,

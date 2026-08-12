@@ -3,6 +3,7 @@ package me.sourov.quicksale.ui.settings
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Sync
@@ -23,6 +24,15 @@ enum class SettingsSection(
     val subtitle: String,
     val icon: ImageVector,
 ) {
+    /**
+     * First, because it is the one setting that changes what every other screen looks like — and
+     * the one most likely to be wrong on a device handed to someone else mid-fair.
+     */
+    DEVICE(
+        title = "This device",
+        subtitle = "Whether this handheld sells, prints labels, or both",
+        icon = Icons.Outlined.PhoneAndroid,
+    ),
     STORE(
         title = "Store connection",
         subtitle = "Site URL and API keys",

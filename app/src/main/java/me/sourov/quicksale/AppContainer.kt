@@ -2,6 +2,7 @@ package me.sourov.quicksale
 
 import android.app.Application
 import android.content.Context
+import me.sourov.quicksale.data.local.CartRepository
 import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.ProductRepository
 import me.sourov.quicksale.data.local.QuickSaleDatabase
@@ -9,6 +10,7 @@ import me.sourov.quicksale.data.scanner.ScannerConfigRepository
 import me.sourov.quicksale.data.settings.AddressFormRepository
 import me.sourov.quicksale.data.settings.CheckoutConfigRepository
 import me.sourov.quicksale.data.settings.CurrencyRepository
+import me.sourov.quicksale.data.settings.DeviceModeRepository
 import me.sourov.quicksale.data.settings.LabelSettingsRepository
 import me.sourov.quicksale.data.settings.OrderSettingsRepository
 import me.sourov.quicksale.data.settings.SettingsRepository
@@ -33,8 +35,10 @@ class AppContainer(context: Context) {
 
     val products by lazy { ProductRepository(database.productDao()) }
     val organizations by lazy { OrganizationRepository(database.organizationDao()) }
+    val cart by lazy { CartRepository(database.cartDao()) }
 
     val settings by lazy { SettingsRepository(dataStore) }
+    val deviceMode by lazy { DeviceModeRepository(dataStore) }
     val orderSettings by lazy { OrderSettingsRepository(dataStore) }
     val labelSettings by lazy { LabelSettingsRepository(dataStore) }
     val scannerConfig by lazy { ScannerConfigRepository(dataStore) }

@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,6 +44,7 @@ fun QuickSaleTopBar(
     onSearchClose: () -> Unit,
     onSync: (() -> Unit)? = null,
     syncing: Boolean = false,
+    onSettings: (() -> Unit)? = null,
 ) {
     val colors = TopAppBarDefaults.topAppBarColors(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -102,6 +104,11 @@ fun QuickSaleTopBar(
                 if (searchEnabled) {
                     IconButton(onClick = onSearchOpen) {
                         Icon(Icons.Outlined.Search, contentDescription = "Search")
+                    }
+                }
+                onSettings?.let {
+                    IconButton(onClick = it) {
+                        Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                     }
                 }
             },

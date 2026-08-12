@@ -159,6 +159,48 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun the_cart_survives_a_migration_and_a_reopen() {
+        seedVersion4Database()
+
+        // v11 adds the cart tables; an upgraded install must get them empty and usable, not
+        // missing — a till that can't write its cart loses a sale on the next process death.
+        val first = openWithRoom()
+        try {
+            runBlocking {
+                val dao = first.cartDao()
+                assertEquals(emptyList<CartLineRecord>(), dao.lines())
+                assertEquals(null, dao.customer())
+
+                dao.replace(
+                    lines = listOf(CartLineRecord(productId = 1, quantity = 6, addedAtMillis = 0)),
+                    customer = CartCustomerRecord(organizationId = 12, memberUserId = 45),
+                )
+            }
+        } finally {
+            first.close()
+        }
+
+        // Reopened, because surviving the *process* is the entire point of the table.
+        val second = openWithRoom()
+        try {
+            runBlocking {
+                val dao = second.cartDao()
+                assertEquals(listOf(CartLineRecord(1, 6, 0)), dao.lines())
+                assertEquals(12L, dao.customer()?.organizationId)
+                assertEquals(45L, dao.customer()?.memberUserId)
+
+                // Replacing with an empty cart is how "clear" is expressed, and it must leave
+                // nothing behind for the next order to inherit.
+                dao.replace(lines = emptyList(), customer = null)
+                assertEquals(emptyList<CartLineRecord>(), dao.lines())
+                assertEquals(null, dao.customer())
+            }
+        } finally {
+            second.close()
+        }
+    }
+
     /** Builds the database exactly as version 4 left it, including a row worth preserving. */
     private fun seedVersion4Database() {
         val file = context.getDatabasePath(databaseName)
@@ -200,6 +242,7 @@ class MigrationTest {
                 QuickSaleDatabase.MIGRATION_7_8,
                 QuickSaleDatabase.MIGRATION_8_9,
                 QuickSaleDatabase.MIGRATION_9_10,
+                QuickSaleDatabase.MIGRATION_10_11,
             )
             .build()
 

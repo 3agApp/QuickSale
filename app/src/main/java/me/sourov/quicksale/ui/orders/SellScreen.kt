@@ -21,12 +21,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.RemoveShoppingCart
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
@@ -42,6 +42,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,26 +56,27 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.sourov.quicksale.data.local.Product
+import me.sourov.quicksale.data.scanner.ScannerHub
 import me.sourov.quicksale.ui.products.ProductThumbnail
 import me.sourov.quicksale.ui.products.asPrice
 import me.sourov.quicksale.ui.theme.Spacing
 
 /**
- * Page one of an order: what's being bought.
+ * The till. A standing cart with the scanner armed, and the app's front door on a selling device.
  *
- * Nothing about money, delivery or payment appears here — those are the checkout's business. The
- * whole screen is the scanner and the list it fills, which is what the counter is actually doing
- * while the customer is standing there.
+ * Nothing about money, delivery, payment — or *who is buying* — appears here. At a fair the visitor
+ * is already standing at the product when they decide they want it, so the first scan has to be the
+ * first thing that happens; the account is the checkout's business. Scanning the same item again
+ * adds another of the store's pack size.
  *
- * The company button in the top bar opens the account behind this order: its billing address and
- * its branches, editable, without leaving the cart.
+ * The cart survives leaving the tab: the view model is scoped to the Sell back-stack entry and
+ * shared with the checkout, so nothing is retyped and nothing is rung up twice.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CartScreen(
-    viewModel: NewOrderViewModel,
-    onBack: () -> Unit,
-    onReviewOrder: () -> Unit,
+fun SellScreen(
+    viewModel: SellViewModel,
+    onCheckout: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val organization by viewModel.organization.collectAsStateWithLifecycle()
@@ -97,41 +99,26 @@ fun CartScreen(
         }
     }
 
+    // Scans are collected here, not in the view model, because the view model outlives this tab —
+    // subscribing there would ring products into the cart while the operator was printing labels.
+    LaunchedEffect(Unit) {
+        ScannerHub.scans.collect(viewModel::onScan)
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = member?.name?.ifBlank { member?.email.orEmpty() } ?: "New order",
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        organization?.let {
-                            Text(
-                                text = it.name,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { showingCompany = true }) {
-                        Icon(
-                            imageVector = Icons.Outlined.Storefront,
-                            contentDescription = "Company details and branches",
-                        )
-                    }
+            // Only what belongs to this cart: who it is for once that is known, and how to empty
+            // it. The app's own bar above already carries the brand and the settings gear.
+            CartBar(
+                organizationName = organization?.name,
+                memberName = member?.name?.ifBlank { member?.email.orEmpty() },
+                canClear = lines.isNotEmpty(),
+                onClear = viewModel::clearCart,
+                onOpenCompany = if (organization != null) {
+                    { showingCompany = true }
+                } else {
+                    null
                 },
             )
         },
@@ -139,11 +126,11 @@ fun CartScreen(
             OrderTotalsBar(
                 totals = totals,
                 itemCount = itemCount,
-                actionLabel = if (lines.isEmpty()) "Add a product to continue" else "Review order",
-                onAction = onReviewOrder,
+                actionLabel = if (lines.isEmpty()) "Scan a product to start" else "Checkout",
+                onAction = onCheckout,
                 // Only the reasons that make the whole order impossible stop you reaching the
-                // checkout; everything else is the checkout's own to explain, on the page that
-                // can actually fix it.
+                // checkout; everything else — including not having picked a customer yet — is the
+                // checkout's own to explain, on the page that can actually fix it.
                 enabled = lines.isNotEmpty() && blocker?.fatal != true,
                 showBreakdown = false,
             )
@@ -233,6 +220,65 @@ fun CartScreen(
             onDismiss = { showingCompany = false },
         )
     }
+}
+
+/**
+ * The cart's own strip: who the order is for, and how to abandon it.
+ *
+ * Before a customer is chosen — which is most of the time the cart is being filled — this says so
+ * plainly rather than showing an empty slot, because "no customer yet" is the normal state here and
+ * not something to fix before scanning.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CartBar(
+    organizationName: String?,
+    memberName: String?,
+    canClear: Boolean,
+    onClear: () -> Unit,
+    onOpenCompany: (() -> Unit)?,
+) {
+    TopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+        title = {
+            Column {
+                Text(
+                    text = organizationName ?: "New order",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = memberName?.takeIf { it.isNotBlank() }
+                        ?: "Customer chosen at checkout",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+        actions = {
+            onOpenCompany?.let {
+                IconButton(onClick = it) {
+                    Icon(
+                        imageVector = Icons.Outlined.Storefront,
+                        contentDescription = "Company details and branches",
+                    )
+                }
+            }
+            if (canClear) {
+                IconButton(onClick = onClear) {
+                    Icon(
+                        imageVector = Icons.Outlined.RemoveShoppingCart,
+                        contentDescription = "Empty the cart",
+                    )
+                }
+            }
+        },
+    )
 }
 
 /** A search match to tap to add. Shared with the order-editing screen's add-product search. */

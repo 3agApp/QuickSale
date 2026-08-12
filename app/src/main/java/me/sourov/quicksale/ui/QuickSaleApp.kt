@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
@@ -21,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -29,20 +31,45 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.launch
 import me.sourov.quicksale.appContainer
 import me.sourov.quicksale.data.scanner.ScannerHub
+import me.sourov.quicksale.data.settings.DeviceMode
 import me.sourov.quicksale.data.sync.SyncManager
+import me.sourov.quicksale.data.sync.SyncState
 import me.sourov.quicksale.data.sync.SyncTarget
 import me.sourov.quicksale.navigation.QuickSaleNavHost
 import me.sourov.quicksale.navigation.Routes
 import me.sourov.quicksale.navigation.TopLevelDestination
 import me.sourov.quicksale.navigation.navigateToTopLevel
+import me.sourov.quicksale.ui.components.ConnectionBanner
 import me.sourov.quicksale.ui.components.QuickSaleTopBar
+import me.sourov.quicksale.ui.onboarding.DeviceModeScreen
+import me.sourov.quicksale.ui.orders.SellViewModel
 import me.sourov.quicksale.ui.update.AppUpdatePrompt
 import me.sourov.quicksale.ui.update.AppUpdateViewModel
 
 @Composable
 fun QuickSaleApp() {
+    val context = LocalContext.current
+    val container = remember(context) { context.appContainer }
+    val scope = rememberCoroutineScope()
+
+    // Null means the question has never been answered on this device, which is the whole of the
+    // first run: nothing else can be laid out until we know what this handheld is for.
+    val deviceMode by container.deviceMode.mode.collectAsStateWithLifecycle(initialValue = null)
+
+    when (val mode = deviceMode) {
+        null -> DeviceModeScreen(
+            onSelect = { chosen -> scope.launch { container.deviceMode.update(chosen) } },
+            modifier = Modifier.fillMaxSize(),
+        )
+        else -> QuickSaleShell(mode = mode)
+    }
+}
+
+@Composable
+private fun QuickSaleShell(mode: DeviceMode) {
     val context = LocalContext.current
     val container = remember(context) { context.appContainer }
     val navController = rememberNavController()
@@ -51,17 +78,38 @@ fun QuickSaleApp() {
         viewModel(factory = AppUpdateViewModel.factory(container.updatePreferences))
     val updateState by updateViewModel.uiState.collectAsStateWithLifecycle()
 
+    /**
+     * The one cart, held above the navigation graph.
+     *
+     * Scoping it here rather than to a back-stack entry is what makes it a *standing* cart: it
+     * survives leaving the Sell tab, so a visitor's half-built order is still there after a detour
+     * into the catalog to answer a question.
+     */
+    val sellViewModel: SellViewModel = viewModel(
+        factory = SellViewModel.factory(
+            organizationRepository = container.organizations,
+            productRepository = container.products,
+            cartRepository = container.cart,
+            settingsRepository = container.settings,
+            orderSettingsRepository = container.orderSettings,
+            checkoutConfigRepository = container.checkoutConfig,
+            addressFormRepository = container.addressForms,
+        ),
+    )
+
+    val tabs = remember(mode) { TopLevelDestination.forMode(mode) }
+    val startDestination = remember(mode) { TopLevelDestination.startFor(mode) }
+
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
     val currentRoute = currentDestination?.route
     val topLevel = TopLevelDestination.fromRoute(currentRoute)
 
     val isProducts = topLevel == TopLevelDestination.PRODUCTS
-    val isOrganizations = topLevel == TopLevelDestination.ORGANIZATIONS
+    val isAccounts = topLevel == TopLevelDestination.ACCOUNTS
 
-    // The order builder and confirmation take over the whole screen and manage their own chrome.
-    val fullScreen = Routes.isFullScreen(currentRoute)
-    val showChrome = !fullScreen
+    // The checkout and confirmation take over the whole screen and manage their own chrome.
+    val showChrome = !Routes.isFullScreen(currentRoute)
 
     var productsQuery by rememberSaveable { mutableStateOf("") }
     var organizationsQuery by rememberSaveable { mutableStateOf("") }
@@ -89,29 +137,32 @@ fun QuickSaleApp() {
         }
     }
 
+    // Null until DataStore answers. Starting from a blank StoreSettings would mean every cold
+    // start flashed "Store not connected" for a frame or two on a perfectly connected till.
+    val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)
     val productsSync by SyncManager.state(SyncTarget.Products).collectAsStateWithLifecycle()
     val organizationsSync by SyncManager.state(SyncTarget.Organizations).collectAsStateWithLifecycle()
 
     // The tab's own sync sits in the top bar, so the list you're looking at is one tap from fresh.
     val topBarSync: (() -> Unit)? = when {
         isProducts -> { { SyncManager.syncProducts(context) } }
-        isOrganizations -> { { SyncManager.syncOrganizations(context) } }
+        isAccounts -> { { SyncManager.syncOrganizations(context) } }
         else -> null
     }
     val topBarSyncing = when {
         isProducts -> productsSync.isRunning
-        isOrganizations -> organizationsSync.isRunning
+        isAccounts -> organizationsSync.isRunning
         else -> false
     }
 
     val activeQuery = when {
         isProducts -> productsQuery
-        isOrganizations -> organizationsQuery
+        isAccounts -> organizationsQuery
         else -> ""
     }
     val onQueryChange: (String) -> Unit = when {
         isProducts -> { value -> productsQuery = value }
-        isOrganizations -> { value -> organizationsQuery = value }
+        isAccounts -> { value -> organizationsQuery = value }
         else -> { _ -> }
     }
     val searchEnabled = topLevel?.searchable == true
@@ -127,23 +178,36 @@ fun QuickSaleApp() {
                 enter = slideInVertically(tween(CHROME_DURATION)) { -it } + fadeIn(tween(CHROME_DURATION)),
                 exit = slideOutVertically(tween(CHROME_DURATION)) { -it } + fadeOut(tween(CHROME_DURATION)),
             ) {
-                QuickSaleTopBar(
-                    showBack = topLevel == null,
-                    onBack = { navController.popBackStack() },
-                    searchEnabled = searchEnabled,
-                    searchActive = showSearchField,
-                    autoFocus = searchActive,
-                    query = activeQuery,
-                    placeholder = topLevel?.searchPlaceholder.orEmpty(),
-                    onQueryChange = onQueryChange,
-                    onSearchOpen = { searchActive = true },
-                    onSearchClose = {
-                        searchActive = false
-                        onQueryChange("")
-                    },
-                    onSync = topBarSync,
-                    syncing = topBarSyncing,
-                )
+                Column {
+                    QuickSaleTopBar(
+                        showBack = topLevel == null,
+                        onBack = { navController.popBackStack() },
+                        searchEnabled = searchEnabled,
+                        searchActive = showSearchField,
+                        autoFocus = searchActive,
+                        query = activeQuery,
+                        placeholder = topLevel?.searchPlaceholder.orEmpty(),
+                        onQueryChange = onQueryChange,
+                        onSearchOpen = { searchActive = true },
+                        onSearchClose = {
+                            searchActive = false
+                            onQueryChange("")
+                        },
+                        onSync = topBarSync,
+                        syncing = topBarSyncing,
+                        // Settings left the bottom bar: it is visited a handful of times per fair
+                        // and was costing a fifth of the bar to say so.
+                        onSettings = { navController.navigate(Routes.SETTINGS) }
+                            .takeIf { currentRoute != Routes.SETTINGS },
+                    )
+                    ConnectionBanner(
+                        // Not-yet-loaded counts as connected: silence is the honest answer until
+                        // the device has actually looked.
+                        configured = settings?.isConfigured != false,
+                        syncError = firstSyncError(productsSync, organizationsSync),
+                        onClick = { navController.navigate(Routes.SETTINGS) },
+                    )
+                }
             }
         },
         bottomBar = {
@@ -153,7 +217,7 @@ fun QuickSaleApp() {
                 exit = slideOutVertically(tween(CHROME_DURATION)) { it } + fadeOut(tween(CHROME_DURATION)),
             ) {
                 NavigationBar {
-                    TopLevelDestination.entries.forEach { destination ->
+                    tabs.forEach { destination ->
                         val selected = currentDestination?.hierarchy?.any {
                             it.route == destination.route
                         } == true
@@ -181,6 +245,8 @@ fun QuickSaleApp() {
         QuickSaleNavHost(
             navController = navController,
             snackbarHostState = snackbarHostState,
+            startDestination = startDestination,
+            sellViewModel = sellViewModel,
             productsQuery = productsQuery,
             organizationsQuery = organizationsQuery,
             modifier = Modifier.padding(innerPadding),
@@ -197,5 +263,14 @@ fun QuickSaleApp() {
         )
     }
 }
+
+/**
+ * The first sync failure worth surfacing, or null when both targets are fine.
+ *
+ * Only one is shown: two banners stacked over the till would push the scan field off the screen,
+ * and the fix for both is the same trip to Settings.
+ */
+private fun firstSyncError(vararg states: SyncState): String? =
+    states.filterIsInstance<SyncState.Error>().firstOrNull()?.message
 
 private const val CHROME_DURATION = 240

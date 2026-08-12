@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -133,6 +134,23 @@ class QuickPrintViewModel(
 
     /** Back to waiting for the next trigger pull, without printing whatever is on screen. */
     fun dismiss() { _state.value = QuickPrintState.Waiting }
+
+    /**
+     * Prints the last label again.
+     *
+     * Thermal label stock jams, misfeeds and comes out streaked, and until now the only way to
+     * recover was to find the box again and re-scan it — which is not always possible once the item
+     * has gone back on the pallet. The last product printed is already known; this reprints it.
+     */
+    fun reprintLast() {
+        val last = _history.value.firstOrNull()?.product ?: return
+        print(last)
+    }
+
+    /** The product a "print that again" would reprint, or null when nothing has printed yet. */
+    val lastPrinted: StateFlow<Product?> = _history
+        .map { it.firstOrNull()?.product }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun setCopies(value: Int) {
         viewModelScope.launch { labelSettingsRepository.setCopies(value) }

@@ -99,8 +99,13 @@ fun QuickPrintScreen(modifier: Modifier = Modifier) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val settings by viewModel.labelSettings.collectAsStateWithLifecycle()
     val history by viewModel.history.collectAsStateWithLifecycle()
+    val lastPrinted by viewModel.lastPrinted.collectAsStateWithLifecycle()
 
     var typedCode by remember { mutableStateOf("") }
+    // The controls and the tally are both things you set once and then work past, so they start
+    // folded away: the status is what this screen is for and it should own the screen.
+    var showControls by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
 
     // Only while this tab is actually on screen — see the note on the function.
     LaunchedEffect(Unit) {
@@ -125,8 +130,36 @@ fun QuickPrintScreen(modifier: Modifier = Modifier) {
             onDismiss = viewModel::dismiss,
         )
 
+        // Reprinting is the single most common thing to want after a print: label stock jams and
+        // streaks, and the box has usually already gone back on the pallet by the time you notice.
+        lastPrinted?.let { product ->
+            Spacer(Modifier.height(Spacing.md))
+            OutlinedButton(
+                onClick = viewModel::reprintLast,
+                enabled = state !is QuickPrintState.Printing,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(Sizes.button),
+            ) {
+                Icon(Icons.Filled.Print, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(Spacing.sm))
+                Text(
+                    text = "Print ${product.name} again",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
         Spacer(Modifier.height(Spacing.lg))
-        QuickSaleCard {
+        SettingsDisclosure(
+            summary = settingsSummary(settings),
+            expanded = showControls,
+            onToggle = { showControls = !showControls },
+        )
+        if (showControls) {
+            Spacer(Modifier.height(Spacing.sm))
+            QuickSaleCard {
             Column(Modifier.padding(Spacing.md)) {
                 LabelStepper(
                     label = "Copies per scan",
@@ -159,6 +192,7 @@ fun QuickPrintScreen(modifier: Modifier = Modifier) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            }
         }
 
         Spacer(Modifier.height(Spacing.lg))
@@ -187,17 +221,57 @@ fun QuickPrintScreen(modifier: Modifier = Modifier) {
                 subtitle = "${count(history.sumOf { it.copies }, "label")} from " +
                     count(history.size, "scan"),
                 trailing = {
-                    TextButton(onClick = viewModel::clearHistory) { Text("Clear") }
+                    TextButton(onClick = { showHistory = !showHistory }) {
+                        Text(if (showHistory) "Hide" else "Show")
+                    }
                 },
             )
-            Spacer(Modifier.height(Spacing.sectionGap))
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                history.forEach { entry -> HistoryRow(entry) }
+            if (showHistory) {
+                Spacer(Modifier.height(Spacing.sectionGap))
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    history.forEach { entry -> HistoryRow(entry) }
+                }
+                Spacer(Modifier.height(Spacing.sm))
+                TextButton(onClick = viewModel::clearHistory) { Text("Clear the tally") }
             }
         }
 
         Spacer(Modifier.height(Spacing.xl))
     }
+}
+
+/** One line describing how the printer is set, and the way to open the controls that change it. */
+@Composable
+private fun SettingsDisclosure(
+    summary: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(vertical = Spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = if (expanded) "Done" else "Change",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+private fun settingsSummary(settings: LabelSettings): String = buildString {
+    append(count(settings.copies, "copy", "copies"))
+    append(" per scan")
+    if (!settings.feedsToNextLabel) append(" · spacing ${settings.spacing}")
 }
 
 /**
@@ -481,8 +555,9 @@ private fun NoPrinterNotice() {
     }
 }
 
-private fun count(value: Int, singular: String): String =
-    "$value ${if (value == 1) singular else "${singular}s"}"
+/** [plural] is only needed where adding an "s" would be wrong — "copy" is the one here. */
+private fun count(value: Int, singular: String, plural: String = "${singular}s"): String =
+    "$value ${if (value == 1) singular else plural}"
 
 private fun codeSummary(product: Product): String = listOfNotNull(
     product.ean.takeIf { it.isNotBlank() }?.let { "EAN $it" },

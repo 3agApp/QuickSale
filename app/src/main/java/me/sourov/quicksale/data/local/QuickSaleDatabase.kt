@@ -10,14 +10,22 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import me.sourov.quicksale.BuildConfig
 
 @Database(
-    entities = [Product::class, Organization::class, Member::class, OrgLocation::class],
-    version = 10,
+    entities = [
+        Product::class,
+        Organization::class,
+        Member::class,
+        OrgLocation::class,
+        CartLineRecord::class,
+        CartCustomerRecord::class,
+    ],
+    version = 11,
     exportSchema = false,
 )
 abstract class QuickSaleDatabase : RoomDatabase() {
 
     abstract fun productDao(): ProductDao
     abstract fun organizationDao(): OrganizationDao
+    abstract fun cartDao(): CartDao
 
     companion object {
         @Volatile
@@ -33,7 +41,7 @@ abstract class QuickSaleDatabase : RoomDatabase() {
                 .addCallback(SeedCallback)
                 .addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
-                    MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
+                    MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
                 )
                 .build()
 
@@ -153,6 +161,26 @@ abstract class QuickSaleDatabase : RoomDatabase() {
                 )
             }
         }
+
+        /**
+         * v11 keeps the cart being built on disk, so a sale survives the app being killed.
+         *
+         * A fair runs the till all day on a handheld that Android is free to reclaim the moment it
+         * goes to the background, and until now that took the visitor's half-built order with it.
+         * Only ids and quantities are stored — the catalog supplies everything else on restore.
+         */
+        @VisibleForTesting
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                CART_SCHEMA.forEach(db::execSQL)
+            }
+        }
+
+        /** As Room generates them for a fresh install — see [ORGANIZATION_SCHEMA] on why verbatim. */
+        private val CART_SCHEMA = listOf(
+            "CREATE TABLE IF NOT EXISTS `cart_lines` (`productId` INTEGER NOT NULL, `quantity` INTEGER NOT NULL, `addedAtMillis` INTEGER NOT NULL, PRIMARY KEY(`productId`))",
+            "CREATE TABLE IF NOT EXISTS `cart_customer` (`id` INTEGER NOT NULL, `organizationId` INTEGER, `memberUserId` INTEGER, PRIMARY KEY(`id`))",
+        )
 
         /**
          * The organization tables, copied verbatim from the statements Room generates for a fresh

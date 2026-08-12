@@ -15,6 +15,18 @@ class OrganizationRepository(private val dao: OrganizationDao) {
 
     fun organization(id: Long): Flow<Organization?> = dao.observeById(id)
 
+    /** People the till can sell to, matching [query] against their name, email or company. */
+    fun searchSellableCustomers(
+        query: String,
+        limit: Int = SELLABLE_SEARCH_LIMIT,
+    ): Flow<List<SellableCustomer>> = dao.searchSellableCustomers(query.trim(), limit)
+
+    /** Active companies matching [query], for attaching a new person to an existing one. */
+    fun searchSellableOrganizations(
+        query: String,
+        limit: Int = SELLABLE_SEARCH_LIMIT,
+    ): Flow<List<Organization>> = dao.searchSellableOrganizations(query.trim(), limit)
+
     fun count(): Flow<Int> = dao.count()
 
     fun countByStatus(status: OrganizationStatus): Flow<Int> = dao.countByStatus(status.slug)
@@ -46,4 +58,9 @@ class OrganizationRepository(private val dao: OrganizationDao) {
         members: List<Member>,
         locations: List<OrgLocation>,
     ) = dao.replaceAll(organizations, members, locations)
+
+    private companion object {
+        /** Enough to scroll a sheet, few enough that the answer is one glance, not a hunt. */
+        const val SELLABLE_SEARCH_LIMIT = 40
+    }
 }

@@ -215,10 +215,32 @@ fun BigDecimal.display(): String = CurrencyFormatter.format(this)
 
 /**
  * WooCommerce's `date_created_gmt` (`2024-03-21T13:13:13`, no offset — it's already UTC) as a
- * short, locale-formatted date for a list or detail header. Unparsable input is shown verbatim
- * rather than blanked, since a raw stamp is still more useful than nothing.
+ * short, locale-formatted date **in the device's own time zone**. Unparsable input is shown
+ * verbatim rather than blanked, since a raw stamp is still more useful than nothing.
+ *
+ * The conversion is not cosmetic. This used to print the UTC stamp as if it were local, which put
+ * an order stamped "3:43 AM" under a *Yesterday* heading — the heading and the time on the row
+ * disagreeing about which day it was.
  */
 fun String.toOrderDateLabel(): String =
-    runCatching { java.time.LocalDateTime.parse(this) }
-        .map { it.format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy · h:mm a")) }
-        .getOrDefault(this)
+    toOrderLocalDateTime()
+        ?.format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy · h:mm a"))
+        ?: this
+
+/**
+ * The same stamp as the calendar day it falls on *here*, or null when it can't be parsed.
+ *
+ * The store reports UTC; a fair runs on local time. Grouping an order taken at 9pm in Berlin under
+ * the previous day — which comparing the raw UTC text would do — is the kind of small wrongness
+ * that makes an operator stop trusting the screen.
+ */
+fun String.toOrderLocalDate(): java.time.LocalDate? = toOrderLocalDateTime()?.toLocalDate()
+
+/** The UTC stamp moved into the device's zone, or null when it can't be parsed. */
+private fun String.toOrderLocalDateTime(): java.time.LocalDateTime? =
+    runCatching {
+        java.time.LocalDateTime.parse(this)
+            .atZone(java.time.ZoneOffset.UTC)
+            .withZoneSameInstant(java.time.ZoneId.systemDefault())
+            .toLocalDateTime()
+    }.getOrNull()

@@ -61,11 +61,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import me.sourov.quicksale.appContainer
 import me.sourov.quicksale.data.local.Product
-import me.sourov.quicksale.data.local.ProductRepository
-import me.sourov.quicksale.data.local.QuickSaleDatabase
-import me.sourov.quicksale.data.settings.LabelSettingsRepository
-import me.sourov.quicksale.data.settings.settingsDataStore
 import me.sourov.quicksale.device.label.LabelRenderer
 import me.sourov.quicksale.device.printer.BldPrintManager
 import me.sourov.quicksale.device.printer.LcPrintDriver
@@ -78,19 +75,14 @@ fun ProductDetailScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val repository = remember {
-        ProductRepository(QuickSaleDatabase.getInstance(context).productDao())
-    }
+    val container = remember(context) { context.appContainer }
     val labelRenderer = remember { LabelRenderer() }
-    val printer = remember {
+    val printer = remember(context) {
         if (BldPrintManager.isSupported()) LcPrintDriver(context) else NoPrinterDriver()
-    }
-    val labelSettingsRepository = remember {
-        LabelSettingsRepository(context.applicationContext.settingsDataStore)
     }
     val viewModel: ProductDetailViewModel = viewModel(
         factory = ProductDetailViewModel.factory(
-            repository, productId, labelRenderer, printer, labelSettingsRepository,
+            container.products, productId, labelRenderer, printer, container.labelSettings,
         ),
     )
     val product by viewModel.product.collectAsStateWithLifecycle()

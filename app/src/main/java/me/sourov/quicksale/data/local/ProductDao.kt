@@ -52,6 +52,10 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE id = :id")
     fun observeById(id: Long): Flow<Product?>
 
+    /** One read, for restoring a saved cart line against today's catalog. */
+    @Query("SELECT * FROM products WHERE id = :id")
+    suspend fun findById(id: Long): Product?
+
     @Query(
         """
         SELECT * FROM products

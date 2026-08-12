@@ -94,8 +94,16 @@ fun OrderListScreen(
     error?.let { OrderErrorDialog(error = it, onDismiss = viewModel::consumeError) }
 }
 
+/**
+ * One order in a list. [showAccount] adds the organization's name, which the account's own history
+ * doesn't need — every row there belongs to the same company — and the all-orders tab does.
+ */
 @Composable
-private fun OrderRow(order: WooCommerceApi.OrderSummary, onClick: () -> Unit) {
+internal fun OrderRow(
+    order: WooCommerceApi.OrderSummary,
+    onClick: () -> Unit,
+    showAccount: Boolean = false,
+) {
     QuickSaleCard(modifier = Modifier.clickable(onClick = onClick)) {
         Row(
             modifier = Modifier
@@ -105,16 +113,27 @@ private fun OrderRow(order: WooCommerceApi.OrderSummary, onClick: () -> Unit) {
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = "Order #${order.number.ifBlank { order.id.toString() }}",
+                    text = if (showAccount && order.organizationName.isNotBlank()) {
+                        order.organizationName
+                    } else {
+                        "Order #${order.number.ifBlank { order.id.toString() }}"
+                    },
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(Spacing.xs))
                 Text(
-                    text = order.dateCreatedGmt.toOrderDateLabel(),
+                    text = buildString {
+                        if (showAccount && order.organizationName.isNotBlank()) {
+                            append("#${order.number.ifBlank { order.id.toString() }} · ")
+                        }
+                        append(order.dateCreatedGmt.toOrderDateLabel())
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(Modifier.height(Spacing.sm))

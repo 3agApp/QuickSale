@@ -40,6 +40,8 @@ fun SettingsSectionScreen(
             .padding(Spacing.screen),
     ) {
         when (section) {
+            SettingsSection.DEVICE -> DeviceModeSection()
+
             SettingsSection.STORE -> StoreConnectionSection(snackbarHostState)
 
             SettingsSection.SYNC -> SyncSettingsSection()

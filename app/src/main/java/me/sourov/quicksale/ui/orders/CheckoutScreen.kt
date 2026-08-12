@@ -12,13 +12,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.PersonSearch
 import androidx.compose.material.icons.outlined.Storefront
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,6 +31,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,11 +45,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.sourov.quicksale.data.local.Member
+import me.sourov.quicksale.data.local.Organization
 import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.ShippingOption
+import me.sourov.quicksale.ui.components.Monogram
 import me.sourov.quicksale.ui.components.QuickSaleCard
 import me.sourov.quicksale.ui.components.SectionHeader
 import me.sourov.quicksale.ui.products.ProductThumbnail
+import me.sourov.quicksale.ui.theme.Sizes
 import me.sourov.quicksale.ui.theme.Spacing
 
 /**
@@ -57,12 +65,13 @@ import me.sourov.quicksale.ui.theme.Spacing
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CheckoutScreen(
-    viewModel: NewOrderViewModel,
+    viewModel: SellViewModel,
     onBack: () -> Unit,
     onPlaced: (result: PlaceResult.Placed) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val organization by viewModel.organization.collectAsStateWithLifecycle()
+    val member by viewModel.member.collectAsStateWithLifecycle()
     val lines by viewModel.lines.collectAsStateWithLifecycle()
     val totals by viewModel.totals.collectAsStateWithLifecycle()
     val itemCount by viewModel.itemCount.collectAsStateWithLifecycle()
@@ -85,6 +94,13 @@ fun CheckoutScreen(
 
     val snackbar = remember { SnackbarHostState() }
     var showingCompany by remember { mutableStateOf(false) }
+    var showingCustomerPicker by remember { mutableStateOf(false) }
+
+    // Opening the checkout with no customer goes straight to the picker: it is the one thing that
+    // must happen here, and making the operator find it first is the step this redesign removes.
+    LaunchedEffect(Unit) {
+        if (viewModel.customer.value == null) showingCustomerPicker = true
+    }
 
     LaunchedEffect(message) {
         message?.let {
@@ -94,7 +110,10 @@ fun CheckoutScreen(
     }
     LaunchedEffect(placed) {
         when (val result = placed) {
-            is PlaceResult.Placed -> onPlaced(result)
+            is PlaceResult.Placed -> {
+                viewModel.consumePlaced()
+                onPlaced(result)
+            }
             null -> Unit
         }
     }
@@ -162,7 +181,18 @@ fun CheckoutScreen(
                 RefusalBanner(text = blocker?.reason.orEmpty())
             }
 
+            // First, because it is the one thing the cart deliberately doesn't know and the one
+            // thing the store won't accept an order without.
             Spacer(Modifier.height(Spacing.md))
+            SectionHeader(title = "Customer")
+            Spacer(Modifier.height(Spacing.sectionGap))
+            CustomerSection(
+                organization = organization,
+                member = member,
+                onChoose = { showingCustomerPicker = true },
+            )
+
+            Spacer(Modifier.height(Spacing.sectionSpacing))
             SectionHeader(
                 title = "Order",
                 subtitle = "$itemCount ${if (itemCount == 1) "item" else "items"}",
@@ -219,7 +249,88 @@ fun CheckoutScreen(
         CompanySheet(viewModel = viewModel, onDismiss = { showingCompany = false })
     }
 
+    if (showingCustomerPicker) {
+        CustomerPickerSheet(
+            onDismiss = { showingCustomerPicker = false },
+            onSelect = { chosen ->
+                viewModel.selectCustomer(chosen)
+                showingCustomerPicker = false
+            },
+        )
+    }
+
     error?.let { OrderErrorDialog(error = it, onDismiss = viewModel::consumeError) }
+}
+
+/**
+ * Who the order is for, or the invitation to say so.
+ *
+ * Before a customer is chosen this is the loudest thing on the page; afterwards it collapses to one
+ * quiet line with a way back, because at that point it is settled and the delivery and payment
+ * below it are what still need attention.
+ */
+@Composable
+private fun CustomerSection(
+    organization: Organization?,
+    member: Member?,
+    onChoose: () -> Unit,
+) {
+    if (organization == null) {
+        QuickSaleCard(containerColor = MaterialTheme.colorScheme.secondaryContainer) {
+            Column(Modifier.padding(Spacing.lg)) {
+                Text(
+                    text = "No customer yet",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Spacer(Modifier.height(Spacing.xs))
+                Text(
+                    text = "The store needs an account before it will take this order.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
+                )
+                Spacer(Modifier.height(Spacing.md))
+                Button(onClick = onChoose) {
+                    Icon(
+                        Icons.Filled.PersonSearch,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(Spacing.sm))
+                    Text("Choose or create")
+                }
+            }
+        }
+        return
+    }
+
+    QuickSaleCard {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Monogram(initials = organization.initials, size = Sizes.avatarSmall)
+            Spacer(Modifier.width(Spacing.md))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = organization.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = member?.name?.ifBlank { member.email } ?: "Loading…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            TextButton(onClick = onChoose) { Text("Change") }
+        }
+    }
 }
 
 /** One cart line, read-only: quantity, picture and what it comes to. */

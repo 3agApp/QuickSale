@@ -114,6 +114,56 @@ class WoapApi(settings: StoreSettings) {
     }
 
     /**
+     * Creates an organization — the fair's whole reason for existing, in one call.
+     *
+     * [billing] carries WooCommerce's own billing field names (`first_name`, `address_1`, `city`,
+     * `country`, …) exactly as the snapshot reports them and the address form renders them.
+     *
+     * [status] is sent explicitly rather than left to the route's default of `pending`. A pending
+     * organization cannot trade, so defaulting would create the account and refuse its order in the
+     * same breath, in front of the customer who just gave you their details.
+     */
+    suspend fun createOrganization(
+        name: String,
+        billing: Map<String, String>,
+        status: String = "active",
+        taxId: String = "",
+    ): Organization {
+        val body = JSONObject().apply {
+            put("name", name)
+            put("status", status)
+            if (taxId.isNotBlank()) put("tax_id", taxId)
+            put("billing", JSONObject().apply { billing.forEach { (k, v) -> put(k, v) } })
+        }
+        return JSONObject(http.post("wc-woap/v1/organizations", body).body).toOrganization()
+    }
+
+    /**
+     * Adds a person to an organization.
+     *
+     * Uses the route's `create` method rather than its default invitation: an invitation is an email
+     * with a link in it, and the buyer standing at the stand needs to be able to order now. The shop
+     * sends its own password-reset mail, so they still get an account they can sign into later.
+     */
+    suspend fun createMember(
+        organizationId: Long,
+        email: String,
+        firstName: String,
+        lastName: String,
+        role: String = "admin",
+    ): Member {
+        val body = JSONObject().apply {
+            put("method", "create")
+            put("email", email)
+            put("role", role)
+            put("first_name", firstName)
+            put("last_name", lastName)
+        }
+        val response = http.post("wc-woap/v1/organizations/$organizationId/members", body)
+        return JSONObject(response.body).toMember(organizationId)
+    }
+
+    /**
      * The answer to a status write. [changed] is false when the organization already held that
      * status — a success, not an error: two people working the same queue, or one double-tap, must
      * not produce two approval emails.

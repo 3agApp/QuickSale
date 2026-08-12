@@ -249,19 +249,32 @@ class WooCommerceApi(settings: StoreSettings) {
     }
 
     /**
-     * Orders for one customer, newest first — the closest the store's API gets to "an
-     * organization's orders", since organizations aren't a WooCommerce customer of their own.
+     * Orders newest first, optionally narrowed to one customer or one organization.
+     *
+     * `woap_organization` is the accounts plugin's own filter on WooCommerce's order route. It is
+     * what an organization's history should be read through: asking each member separately and
+     * merging is one request per member, and it silently loses any order placed by a member who has
+     * since been removed from the account.
+     *
+     * With neither filter this is the whole store's recent order feed, which is what the Orders tab
+     * shows.
      */
-    suspend fun fetchOrders(customerId: Long, page: Int, perPage: Int = 20): Page<OrderSummary> {
+    suspend fun fetchOrders(
+        customerId: Long? = null,
+        organizationId: Long? = null,
+        page: Int = 1,
+        perPage: Int = 20,
+    ): Page<OrderSummary> {
         val response = http.get(
             path = "wc/v3/orders",
-            query = mapOf(
-                "customer" to customerId.toString(),
-                "page" to page.toString(),
-                "per_page" to perPage.toString(),
-                "orderby" to "date",
-                "order" to "desc",
-            ),
+            query = buildMap {
+                customerId?.let { put("customer", it.toString()) }
+                organizationId?.let { put("woap_organization", it.toString()) }
+                put("page", page.toString())
+                put("per_page", perPage.toString())
+                put("orderby", "date")
+                put("order", "desc")
+            },
         )
         val array = JSONArray(response.body)
         val items = buildList(array.length()) {

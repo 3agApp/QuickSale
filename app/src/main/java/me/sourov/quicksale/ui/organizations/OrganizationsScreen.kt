@@ -14,9 +14,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Place
@@ -26,11 +28,14 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -84,6 +89,8 @@ fun OrganizationsScreen(
     val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle()
     val syncState by SyncManager.state(SyncTarget.Organizations).collectAsStateWithLifecycle()
 
+    var creating by remember { mutableStateOf(false) }
+
     // Pull to refresh: the gesture the list already invites, wired to the same sync as everywhere.
     PullToRefreshBox(
         isRefreshing = syncState.isRunning,
@@ -97,16 +104,35 @@ fun OrganizationsScreen(
                 onSelect = viewModel::setStatusFilter,
             )
 
-            Text(
-                text = "$count ${if (count == 1) "organization" else "organizations"}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(
-                    start = Spacing.screen,
-                    top = Spacing.xs,
-                    bottom = Spacing.xs,
-                ),
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = Spacing.screen,
+                        end = Spacing.sm,
+                        top = Spacing.xs,
+                        bottom = Spacing.xs,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "$count ${if (count == 1) "organization" else "organizations"}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                // Also reachable mid-order from the checkout's customer picker; this is the same
+                // sheet, for signing someone up when there is no order in hand yet.
+                TextButton(onClick = { creating = true }) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(Spacing.xs))
+                    Text("New customer")
+                }
+            }
 
             val refreshing = organizations.loadState.refresh is LoadState.Loading
             when {
@@ -159,6 +185,18 @@ fun OrganizationsScreen(
                 }
             }
         }
+    }
+
+    if (creating) {
+        NewCustomerSheet(
+            onDismiss = { creating = false },
+            onCreated = {
+                creating = false
+                // They exist on the store but not yet in the local snapshot; the sync is what
+                // makes them appear in this list.
+                SyncManager.syncOrganizations(context)
+            },
+        )
     }
 }
 

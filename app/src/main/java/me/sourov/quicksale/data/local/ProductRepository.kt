@@ -13,6 +13,9 @@ class ProductRepository(private val dao: ProductDao) {
 
     fun product(id: Long): Flow<Product?> = dao.observeById(id)
 
+    /** A single read of one product, for restoring a persisted cart line. */
+    suspend fun byId(id: Long): Product? = dao.findById(id)
+
     /** Up to 50 *published* products matching the query by name, SKU or EAN, for the order picker. */
     fun search(query: String): Flow<List<Product>> = dao.search(query.trim())
 
