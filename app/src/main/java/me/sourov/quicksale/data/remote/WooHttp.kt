@@ -209,18 +209,24 @@ private fun fallbackErrorMessage(status: Int): String = when (status) {
     else -> "The store returned HTTP $status"
 }
 
-/** Strips the markup WordPress sometimes wraps around error messages. */
+/**
+ * Strips the markup WordPress wraps around error messages and product descriptions.
+ *
+ * Entities go through [decodeHtmlEntities] rather than a handful of hand-written replacements.
+ * The old list covered five of them, which was enough for an English error message and not nearly
+ * enough for a product description: a German catalog put `Kreativit&auml;t` and `f&#xFC;r kleine
+ * K&#xFC;nstler` on the screen verbatim, because neither the named umlauts nor the hex form were
+ * in the list. Decoding runs after the tags are removed, so an escaped `&lt;` survives as text
+ * instead of being mistaken for markup, and before whitespace is collapsed, so a decoded `&nbsp;`
+ * folds into the space beside it.
+ */
 internal fun String.stripHtml(): String =
     replace(Regex("<[^>]*>"), "")
-        .replace("&amp;", "&")
-        .replace("&nbsp;", " ")
-        .replace("&#8211;", "-")
-        .replace("&quot;", "\"")
-        .replace("&#039;", "'")
+        .decodeHtmlEntities()
         .replace(Regex("\\s+"), " ")
         .trim()
 
-/** Decodes numeric (`&#36;`, `&#x24;`) and a few named HTML entities used by currency symbols. */
+/** Decodes numeric (`&#36;`, `&#x24;`) and the named HTML entities a European catalog uses. */
 internal fun String.decodeHtmlEntities(): String {
     if ('&' !in this) return this
     return Regex("&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);").replace(this) { match ->
@@ -234,7 +240,29 @@ internal fun String.decodeHtmlEntities(): String {
     }
 }
 
+/**
+ * The named entities worth carrying, which is not all of HTML's several hundred.
+ *
+ * Punctuation and currency because they turn up in prices and copy; the accented Latin letters
+ * because the shop's catalog is German, French and Italian, and `K&uuml;nstler` printed raw on a
+ * shelf label is the kind of thing a customer sees before anyone else does. Anything unlisted is
+ * left exactly as it came rather than guessed at.
+ */
 private val NAMED_ENTITIES = mapOf(
     "amp" to '&'.code, "lt" to '<'.code, "gt" to '>'.code, "nbsp" to ' '.code,
+    "quot" to '"'.code, "apos" to '\''.code,
     "pound" to '£'.code, "euro" to '€'.code, "yen" to '¥'.code, "cent" to '¢'.code,
+    "ndash" to '–'.code, "mdash" to '—'.code, "hellip" to '…'.code,
+    "lsquo" to '‘'.code, "rsquo" to '’'.code, "ldquo" to '“'.code, "rdquo" to '”'.code,
+    "bull" to '•'.code, "middot" to '·'.code, "times" to '×'.code, "deg" to '°'.code,
+    "reg" to '®'.code, "copy" to '©'.code, "trade" to '™'.code,
+    "auml" to 'ä'.code, "ouml" to 'ö'.code, "uuml" to 'ü'.code,
+    "Auml" to 'Ä'.code, "Ouml" to 'Ö'.code, "Uuml" to 'Ü'.code, "szlig" to 'ß'.code,
+    "agrave" to 'à'.code, "aacute" to 'á'.code, "acirc" to 'â'.code, "aring" to 'å'.code,
+    "egrave" to 'è'.code, "eacute" to 'é'.code, "ecirc" to 'ê'.code, "euml" to 'ë'.code,
+    "igrave" to 'ì'.code, "iacute" to 'í'.code, "icirc" to 'î'.code, "iuml" to 'ï'.code,
+    "ograve" to 'ò'.code, "oacute" to 'ó'.code, "ocirc" to 'ô'.code, "oslash" to 'ø'.code,
+    "ugrave" to 'ù'.code, "uacute" to 'ú'.code, "ucirc" to 'û'.code,
+    "ccedil" to 'ç'.code, "ntilde" to 'ñ'.code,
+    "Agrave" to 'À'.code, "Eacute" to 'É'.code, "Ccedil" to 'Ç'.code,
 )

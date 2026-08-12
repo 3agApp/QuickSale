@@ -9,15 +9,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -71,7 +69,13 @@ fun OrderTotalsBar(
     Surface(modifier = modifier, shadowElevation = 8.dp) {
         Column(
             modifier = Modifier
-                .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                // Whatever the shell has not already accounted for — see `consumeWindowInsets` in
+                // QuickSaleApp. On the till that is nothing but the keyboard's own extra height,
+                // so the bar lands exactly on top of the keyboard rather than a bar's height
+                // above it; on the checkout, which hides the shell's chrome, it is the system
+                // navigation bar too.
+                .navigationBarsPadding()
+                .imePadding()
                 .padding(Spacing.screen),
         ) {
             if (showBreakdown && (totals.shipping != null || totals.tax != null)) {

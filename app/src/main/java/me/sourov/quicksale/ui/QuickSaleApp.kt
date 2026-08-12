@@ -7,6 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
@@ -349,7 +350,19 @@ private fun QuickSaleShell(mode: DeviceMode) {
             organizationsQuery = organizationsQuery,
             creatingCustomer = creatingCustomer,
             onCreatingCustomerChange = { creatingCustomer = it },
-            modifier = Modifier.padding(innerPadding),
+            modifier = Modifier
+                .padding(innerPadding)
+                // Tell everything below how much of the window this shell has already taken.
+                //
+                // `padding(innerPadding)` moves the content out from under the bars but leaves the
+                // insets themselves looking untouched, so a screen inside that asks for
+                // `imePadding()` — or a bar of its own that lifts above the keyboard — measures
+                // from the true screen edge and adds the whole inset a second time. On the C6 that
+                // is 112dp (a 64dp navigation bar over a 48dp system bar), which is why the till's
+                // totals bar and the order editor's Save button floated a bar's height above the
+                // keyboard. Consuming it here makes every nested inset modifier add only the part
+                // nobody has accounted for yet, and costs nothing when there is nothing left.
+                .consumeWindowInsets(innerPadding),
         )
     }
 

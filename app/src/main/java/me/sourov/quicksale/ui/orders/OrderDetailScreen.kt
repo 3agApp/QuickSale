@@ -5,17 +5,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -418,13 +415,11 @@ private fun EditOrderBar(
     Surface(shadowElevation = 8.dp) {
         Column(
             modifier = Modifier
-                // Only what the keyboard adds *beyond* the system navigation bar.
-                //
-                // Unlike the cart's totals bar, this screen keeps the shell's bottom navigation
-                // below it, and that bar already consumes the system inset — so taking the whole
-                // of `navigationBars` here counted it twice and left a visible gap. The keyboard
-                // still has to be handled: it covers the shell's bar, and would cover Save with it.
-                .windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars))
+                // Only what the shell has not already taken. This screen keeps the shell's bottom
+                // navigation below it, so in practice that is the keyboard alone — which covers
+                // that navigation bar, and would take Save down with it.
+                .navigationBarsPadding()
+                .imePadding()
                 .padding(Spacing.screen),
         ) {
             Row(
