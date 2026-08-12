@@ -110,6 +110,11 @@ private fun QuickSaleShell(mode: DeviceMode) {
 
     // The checkout and confirmation take over the whole screen and manage their own chrome.
     val showChrome = !Routes.isFullScreen(currentRoute)
+    // Order list and detail keep the bottom bar but bring their own top bar, so the shell's would
+    // be a second one stacked above it — complete with a second back arrow.
+    val showTopBar = showChrome && !Routes.ownsTopBar(currentRoute)
+    val inSettings = currentRoute == Routes.SETTINGS ||
+        currentRoute?.startsWith(Routes.SETTINGS_SECTION) == true
 
     var productsQuery by rememberSaveable { mutableStateOf("") }
     var organizationsQuery by rememberSaveable { mutableStateOf("") }
@@ -177,7 +182,7 @@ private fun QuickSaleShell(mode: DeviceMode) {
             // Animated rather than switched off outright: removing the bars in a single frame is
             // what made entering the order screen feel like a jump cut.
             AnimatedVisibility(
-                visible = showChrome,
+                visible = showTopBar,
                 enter = slideInVertically(tween(CHROME_DURATION)) { -it } + fadeIn(tween(CHROME_DURATION)),
                 exit = slideOutVertically(tween(CHROME_DURATION)) { -it } + fadeOut(tween(CHROME_DURATION)),
             ) {
@@ -200,8 +205,10 @@ private fun QuickSaleShell(mode: DeviceMode) {
                         syncing = topBarSyncing,
                         // Settings left the bottom bar: it is visited a handful of times per fair
                         // and was costing a fifth of the bar to say so.
+                        // Hidden throughout settings — including its section pages, where the
+                        // gear used to push a second copy of Settings on top of itself.
                         onSettings = { navController.navigate(Routes.SETTINGS) }
-                            .takeIf { currentRoute != Routes.SETTINGS },
+                            .takeIf { !inSettings },
                     )
                     ConnectionBanner(
                         // Not-yet-loaded counts as connected: silence is the honest answer until

@@ -127,6 +127,20 @@ object Routes {
 
     fun isFullScreen(route: String?): Boolean = route?.toRouteBase() in FULL_SCREEN_ROUTES
 
+    /**
+     * Routes that draw their own top app bar, and so must not get the shell's as well.
+     *
+     * These carry a title worth reading — an order number, the account it belongs to — and an
+     * action of their own, which the shell's brand-lockup bar has nowhere to put. Stacking the two
+     * produced a screen with two app bars and *two back arrows*, one above the other.
+     *
+     * Distinct from [isFullScreen]: these keep the bottom navigation, because they are reached from
+     * a tab and leaving them for another tab is a normal thing to want.
+     */
+    private val OWN_TOP_BAR_ROUTES = setOf(ORDER_LIST, ORDER_DETAIL)
+
+    fun ownsTopBar(route: String?): Boolean = route?.toRouteBase() in OWN_TOP_BAR_ROUTES
+
     /** `order_confirmation/{id}?total={total}` → `order_confirmation`. */
     private fun String.toRouteBase(): String = substringBefore('/').substringBefore('?')
 }

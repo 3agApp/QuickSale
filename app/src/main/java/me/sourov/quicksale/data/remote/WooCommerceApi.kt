@@ -578,11 +578,18 @@ class WooCommerceApi(settings: StoreSettings) {
         }.orEmpty()
     }
 
+    /**
+     * Names pulled out of an array of objects, decoded.
+     *
+     * WordPress serves taxonomy names HTML-encoded, so a category the shop calls "Basteln & Co."
+     * arrives as `Basteln &amp; Co.` and was being printed that way on the product screen.
+     */
     private fun JSONArray?.namesList(key: String): List<String> {
         if (this == null) return emptyList()
         return buildList {
             for (i in 0 until length()) {
-                optJSONObject(i)?.optString(key)?.takeIf { it.isNotBlank() }?.let { add(it) }
+                optJSONObject(i)?.optString(key)?.takeIf { it.isNotBlank() }
+                    ?.let { add(it.decodeHtmlEntities()) }
             }
         }
     }
