@@ -54,14 +54,21 @@ data class CartLine(val product: Product, val quantity: Int) {
 }
 
 /**
- * Where this order is going. Mirrors what the store accepts: a saved location resolved by ID, a
- * typed one-off address, or nothing at all for a walk-out sale.
+ * Where this order is going.
+ *
+ * There is one address form, not a choice between a saved branch and a typed address. Picking a
+ * branch *fills* the form; the operator may then correct a house number without that correction
+ * being written back to the branch. What the request carries follows from whether anything was
+ * corrected — see [NewOrderViewModel.destination].
  */
-sealed interface DeliveryChoice {
-    data object None : DeliveryChoice
-    data class AtLocation(val locationId: Long) : DeliveryChoice
-    data object OneOffAddress : DeliveryChoice
-}
+data class DeliveryState(
+    /** False for a walk-out sale: no location, no shipping lines, stamped with location `0`. */
+    val enabled: Boolean = true,
+    /** The branch the form was filled from, or null when nothing has been picked. */
+    val branchId: Long? = null,
+    /** True once the form no longer matches [branchId]'s saved address. */
+    val edited: Boolean = false,
+)
 
 /**
  * The running totals shown while building the order. Tax is a local estimate from the store's
@@ -115,13 +122,23 @@ class NewOrderViewModel(
     val member: StateFlow<Member?> = organizationRepository.member(organizationId, memberUserId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /** Only the locations this member is allowed to choose, default first. */
+    /** Only the branches this member is allowed to choose, default first. */
     @OptIn(ExperimentalCoroutinesApi::class)
     val locations: StateFlow<List<OrgLocation>> = member
         .flatMapLatest { current ->
             if (current == null) flowOf(emptyList()) else organizationRepository.locationsFor(current)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Every branch the organization has, ignoring the member's access list.
+     *
+     * `location_access` limits what a member may *choose*, not what the company owns — so the
+     * company sheet, which is a view of the account rather than of this order, shows all of them.
+     */
+    val allLocations: StateFlow<List<OrgLocation>> =
+        organizationRepository.locations(organizationId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val checkout: StateFlow<CheckoutConfig> = checkoutConfigRepository.config
         .stateIn(viewModelScope, SharingStarted.Eagerly, CheckoutConfig())
@@ -136,14 +153,26 @@ class NewOrderViewModel(
         .map { lines -> lines.sumOf { it.quantity } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
-    private val _delivery = MutableStateFlow<DeliveryChoice>(DeliveryChoice.None)
-    val delivery: StateFlow<DeliveryChoice> = _delivery.asStateFlow()
+    private val _deliveryEnabled = MutableStateFlow(true)
 
-    private val _oneOffCountry = MutableStateFlow("")
-    val oneOffCountry: StateFlow<String> = _oneOffCountry.asStateFlow()
+    private val _branchId = MutableStateFlow<Long?>(null)
 
-    private val _oneOffValues = MutableStateFlow<Map<String, String>>(emptyMap())
-    val oneOffValues: StateFlow<Map<String, String>> = _oneOffValues.asStateFlow()
+    private val _addressCountry = MutableStateFlow("")
+    val addressCountry: StateFlow<String> = _addressCountry.asStateFlow()
+
+    private val _addressValues = MutableStateFlow<Map<String, String>>(emptyMap())
+    val addressValues: StateFlow<Map<String, String>> = _addressValues.asStateFlow()
+
+    /** Whether the delivery form still matches the branch it was filled from. */
+    private val addressEdited: StateFlow<Boolean> =
+        combine(_branchId, _addressValues, locations) { branchId, values, available ->
+            val branch = available.firstOrNull { it.id == branchId } ?: return@combine false
+            !branch.matchesAddress(values)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val delivery: StateFlow<DeliveryState> =
+        combine(_deliveryEnabled, _branchId, addressEdited, ::DeliveryState)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DeliveryState())
 
     /** The operator's explicit gateway pick; null falls back to the store's first gateway. */
     private val _gatewayChoice = MutableStateFlow<PaymentGateway?>(null)
@@ -166,20 +195,20 @@ class NewOrderViewModel(
             previewTotals(lines, shipping, cost, config)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, TotalsPreview())
 
-    /** The visible fields of the one-off form for the chosen country, in WooCommerce's order. */
-    val oneOffFields: StateFlow<List<AddressField>> =
-        combine(addressForms, _oneOffCountry) { forms, country ->
+    /** The visible fields of the delivery form for the chosen country, in WooCommerce's order. */
+    val addressFields: StateFlow<List<AddressField>> =
+        combine(addressForms, _addressCountry) { forms, country ->
             forms.fieldsFor(country.ifBlank { forms.defaultCountry })
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
-     * Required one-off fields still empty, by label. Client-side validation stops here
-     * deliberately: the store validates every one-off address with its own per-country rules —
+     * Required address fields still empty, by label. Client-side validation stops here
+     * deliberately: the store validates every typed address with its own per-country rules —
      * postcode format, states from the country's list — and its answers are the authoritative ones.
      */
-    val missingOneOffFields: StateFlow<List<String>> =
-        combine(oneOffFields, _oneOffValues, _delivery) { fields, values, delivery ->
-            if (delivery !is DeliveryChoice.OneOffAddress) {
+    val missingAddressFields: StateFlow<List<String>> =
+        combine(addressFields, _addressValues, _deliveryEnabled) { fields, values, enabled ->
+            if (!enabled) {
                 emptyList()
             } else {
                 fields.filter { it.required && values[it.name].orEmpty().isBlank() }.map { it.label }
@@ -198,19 +227,19 @@ class NewOrderViewModel(
     /** Why the order can't be placed yet, or null when it can. */
     val blocker: StateFlow<PlaceBlocker?> = combine(
         buyer,
-        _delivery,
+        _deliveryEnabled,
         _shippingChoice,
-        missingOneOffFields,
-        oneOffFields,
-    ) { who, delivery, shipping, missing, fields ->
+        missingAddressFields,
+        addressFields,
+    ) { who, deliveryEnabled, shipping, missing, fields ->
         placeBlocker(
             organization = who.organization,
             member = who.member,
             lines = who.lines,
-            delivery = delivery,
+            deliveryEnabled = deliveryEnabled,
             shipping = shipping,
             missingFields = missing,
-            oneOffFieldCount = fields.size,
+            addressFieldCount = fields.size,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -240,18 +269,18 @@ class NewOrderViewModel(
         viewModelScope.launch {
             ScannerHub.scans.collect { code -> handleCode(code.trim()) }
         }
-        // Preselect the member's default location so the common case needs no taps.
+        // Fill the delivery form from the member's default branch, so the common case needs no
+        // taps at all: the address is already the one this order was always going to.
         viewModelScope.launch {
             val available = locations.first { it.isNotEmpty() }
-            if (_delivery.value is DeliveryChoice.None) {
-                val preferred = available.firstOrNull { it.isDefault } ?: available.first()
-                _delivery.value = DeliveryChoice.AtLocation(preferred.id)
+            if (_branchId.value == null) {
+                selectBranch((available.firstOrNull { it.isDefault } ?: available.first()).id)
             }
         }
-        // Start the one-off form on the shop's own base country.
+        // An account with no branches still needs a form; start it on the shop's own base country.
         viewModelScope.launch {
             val forms = addressForms.first { !it.isEmpty }
-            if (_oneOffCountry.value.isBlank()) selectOneOffCountry(forms.defaultCountry)
+            if (_addressCountry.value.isBlank()) selectAddressCountry(forms.defaultCountry)
         }
     }
 
@@ -259,18 +288,35 @@ class NewOrderViewModel(
 
     fun selectGateway(gateway: PaymentGateway) { _gatewayChoice.value = gateway }
 
-    fun selectDelivery(choice: DeliveryChoice) { _delivery.value = choice }
+    fun setDeliveryEnabled(enabled: Boolean) { _deliveryEnabled.value = enabled }
 
-    fun selectOneOffCountry(code: String) {
-        _oneOffCountry.value = code
+    /**
+     * Fills the delivery form from a saved branch.
+     *
+     * The branch is copied into the form, not referenced by it — which is what lets the operator
+     * correct a house number for one order without that correction reaching the company's records.
+     */
+    fun selectBranch(branchId: Long) {
+        val branch = locations.value.firstOrNull { it.id == branchId } ?: return
+        _branchId.value = branchId
+        val fields = branch.toAddressFields()
+        _addressCountry.value = fields["country"].orEmpty()
+        _addressValues.value = fields
+    }
+
+    /** Puts the branch's own address back, discarding this order's edits. */
+    fun resetAddressToBranch() { _branchId.value?.let(::selectBranch) }
+
+    fun selectAddressCountry(code: String) {
+        _addressCountry.value = code
         // Field definitions differ per country, so values whose field no longer exists are dropped
         // rather than posted under a name this country's form never had.
         val allowed = addressForms.value.fieldsFor(code).map { it.name }.toSet()
-        _oneOffValues.value = _oneOffValues.value.filterKeys { it in allowed } + ("country" to code)
+        _addressValues.value = _addressValues.value.filterKeys { it in allowed } + ("country" to code)
     }
 
-    fun setOneOffField(name: String, value: String) {
-        _oneOffValues.value = _oneOffValues.value + (name to value)
+    fun setAddressField(name: String, value: String) {
+        _addressValues.value = _addressValues.value + (name to value)
     }
 
     /** Picks a shipping method (or null for no shipping) and pre-fills its configured cost. */
@@ -414,36 +460,47 @@ class NewOrderViewModel(
         }
     }
 
-    /** Translates the operator's delivery choice into what the order request carries. */
-    private fun destination(): WooCommerceApi.Destination = when (val choice = _delivery.value) {
-        is DeliveryChoice.AtLocation -> WooCommerceApi.Destination.Location(choice.locationId)
-
-        DeliveryChoice.OneOffAddress -> WooCommerceApi.Destination.OneOff(
+    /**
+     * Translates the delivery form into what the order request carries.
+     *
+     * An untouched form is posted as its branch's ID: the store resolves that against the member's
+     * access list and stamps the branch's name on the order, which is both cheaper and more
+     * truthful than re-posting an address the store already holds. Only an *edited* form becomes a
+     * typed address — and it is sent even for an account that forbids custom shipping, so the
+     * refusal the operator sees is the store's own reason rather than a guess made here.
+     */
+    private fun destination(): WooCommerceApi.Destination {
+        if (!_deliveryEnabled.value) return WooCommerceApi.Destination.None
+        val branchId = _branchId.value
+        if (branchId != null && !addressEdited.value) {
+            return WooCommerceApi.Destination.Location(branchId)
+        }
+        return WooCommerceApi.Destination.OneOff(
             // Only the fields this country's form actually defines, so nothing stray is posted.
-            fields = oneOffFields.value.associate { field ->
-                field.name to _oneOffValues.value[field.name].orEmpty()
+            fields = addressFields.value.associate { field ->
+                field.name to _addressValues.value[field.name].orEmpty()
             } + ("country" to currentCountry()),
         )
-
-        DeliveryChoice.None -> WooCommerceApi.Destination.None
     }
 
     private fun currentCountry(): String =
-        _oneOffCountry.value.ifBlank { addressForms.value.defaultCountry }
+        _addressCountry.value.ifBlank { addressForms.value.defaultCountry }
 
+    /** The branch name to show on the confirmation when the store doesn't stamp one itself. */
     private fun chosenLocationName(): String {
-        val choice = _delivery.value as? DeliveryChoice.AtLocation ?: return ""
-        return locations.value.firstOrNull { it.id == choice.locationId }?.name.orEmpty()
+        if (!_deliveryEnabled.value || addressEdited.value) return ""
+        val branchId = _branchId.value ?: return ""
+        return locations.value.firstOrNull { it.id == branchId }?.name.orEmpty()
     }
 
     private fun placeBlocker(
         organization: Organization?,
         member: Member?,
         lines: List<CartLine>,
-        delivery: DeliveryChoice,
+        deliveryEnabled: Boolean,
         shipping: ShippingOption?,
         missingFields: List<String>,
-        oneOffFieldCount: Int,
+        addressFieldCount: Int,
     ): PlaceBlocker? {
         if (organization == null || member == null) return PlaceBlocker("Loading this account…", false)
         if (!organization.orgStatus.canTrade) {
@@ -458,16 +515,13 @@ class NewOrderViewModel(
         }
         if (lines.isEmpty()) return PlaceBlocker("Add at least one product", false)
         // WooCommerce decides an order "needs delivery" from its shipping lines, not its products.
-        if (shipping != null && delivery is DeliveryChoice.None) {
-            return PlaceBlocker("Choose where this order is going", false)
+        if (shipping != null && !deliveryEnabled) {
+            return PlaceBlocker("Turn on delivery — this order is being shipped", false)
         }
-        if (delivery is DeliveryChoice.OneOffAddress) {
-            if (!organization.allowCustomShipping) {
-                return PlaceBlocker("${organization.name} only accepts its saved locations", false)
-            }
+        if (deliveryEnabled) {
             // With no synced form there are no fields to fill, so "nothing missing" would be a
             // false pass — the request would carry an empty shipping block for the store to reject.
-            if (oneOffFieldCount == 0) {
+            if (addressFieldCount == 0) {
                 return PlaceBlocker("Sync accounts to enter an address", false)
             }
             if (missingFields.isNotEmpty()) {

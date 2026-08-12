@@ -14,11 +14,15 @@ import java.net.URLEncoder
  * A failed store request. Callers should branch on [code] — the machine-readable slug WordPress
  * and the organization plugin return — and show [message], which is already localised to the
  * site's language and phrased for a person to act on.
+ *
+ * [params] carries WordPress's own `data.params` on a validation refusal: field path → reason, so a
+ * form can mark the offending inputs instead of showing one banner over a fourteen-field address.
  */
 class WooApiException(
     val code: String,
     override val message: String,
     val status: Int,
+    val params: Map<String, String> = emptyMap(),
 ) : Exception(message)
 
 /** A response, with the few headers the sync path needs. Header names are matched case-insensitively. */
@@ -60,17 +64,38 @@ class WooHttp(private val settings: StoreSettings) {
         query: Map<String, String> = emptyMap(),
     ): WooResponse = request("POST", path, query, body = body.toString(), ifNoneMatch = null)
 
+    /**
+     * `PATCH https://site/wp-json/[path]` with a JSON [body].
+     *
+     * Sent as a POST carrying `X-HTTP-Method-Override`, because `HttpURLConnection` refuses to issue
+     * a PATCH at all. `WP_REST_Server::dispatch()` reads that header on POST requests and routes to
+     * the PATCH handler, which is the same path WooCommerce's own clients take.
+     */
+    suspend fun patch(
+        path: String,
+        body: JSONObject,
+        query: Map<String, String> = emptyMap(),
+    ): WooResponse = request(
+        method = "POST",
+        path = path,
+        query = query,
+        body = body.toString(),
+        ifNoneMatch = null,
+        methodOverride = "PATCH",
+    )
+
     private suspend fun request(
         method: String,
         path: String,
         query: Map<String, String>,
         body: String?,
         ifNoneMatch: String?,
+        methodOverride: String? = null,
     ): WooResponse = withContext(Dispatchers.IO) {
-        val response = execute(method, path, query, body, ifNoneMatch, useQueryAuth = false)
+        val response = execute(method, path, query, body, ifNoneMatch, methodOverride, useQueryAuth = false)
         // Retry once with query-string auth for hosts that strip the Authorization header.
         val final = if (response.status == 401 || response.status == 403) {
-            execute(method, path, query, body, ifNoneMatch, useQueryAuth = true)
+            execute(method, path, query, body, ifNoneMatch, methodOverride, useQueryAuth = true)
         } else {
             response
         }
@@ -84,6 +109,7 @@ class WooHttp(private val settings: StoreSettings) {
         query: Map<String, String>,
         body: String?,
         ifNoneMatch: String?,
+        methodOverride: String?,
         useQueryAuth: Boolean,
     ): WooResponse {
         val base = normalizeHttpsSiteUrl(settings.siteUrl)
@@ -109,6 +135,7 @@ class WooHttp(private val settings: StoreSettings) {
                 connectTimeout = TIMEOUT_MS
                 readTimeout = TIMEOUT_MS
                 setRequestProperty("Accept", "application/json")
+                methodOverride?.let { setRequestProperty("X-HTTP-Method-Override", it) }
                 if (!useQueryAuth) setRequestProperty("Authorization", basicAuthHeader())
                 ifNoneMatch?.takeIf { it.isNotBlank() }?.let { setRequestProperty("If-None-Match", it) }
                 if (body != null) {
@@ -145,32 +172,41 @@ class WooHttp(private val settings: StoreSettings) {
         const val TIMEOUT_MS = 20_000
 
         fun String.urlEncoded(): String = URLEncoder.encode(this, "UTF-8")
-
-        /**
-         * WordPress errors are `{"code": "...", "message": "..."}`. Keep both: the code drives
-         * behaviour, the message is what the counter staff reads.
-         */
-        fun parseError(status: Int, body: String): WooApiException {
-            val json = runCatching { JSONObject(body) }.getOrNull()
-            val code = json?.optString("code")?.takeIf { it.isNotBlank() } ?: fallbackCode(status)
-            val message = json?.optString("message")?.takeIf { it.isNotBlank() }?.stripHtml()
-                ?: fallbackMessage(status)
-            return WooApiException(code, message, status)
-        }
-
-        fun fallbackCode(status: Int): String = when (status) {
-            401, 403 -> "woocommerce_rest_authentication_error"
-            404 -> "rest_no_route"
-            else -> "quicksale_http_$status"
-        }
-
-        fun fallbackMessage(status: Int): String = when (status) {
-            401, 403 -> "Your store rejected the API keys — check them in Settings"
-            404 -> "That endpoint wasn't found — is the organization accounts plugin active?"
-            in 500..599 -> "The store hit an error (HTTP $status) — try again shortly"
-            else -> "The store returned HTTP $status"
-        }
     }
+}
+
+/**
+ * WordPress errors are `{"code": "...", "message": "...", "data": {"params": {…}}}`. Keep all three:
+ * the code drives behaviour, the message is what the counter staff reads, and `data.params` names
+ * the fields a form should mark.
+ */
+internal fun parseError(status: Int, body: String): WooApiException {
+    val json = runCatching { JSONObject(body) }.getOrNull()
+    val code = json?.optString("code")?.takeIf { it.isNotBlank() } ?: fallbackErrorCode(status)
+    val message = json?.optString("message")?.takeIf { it.isNotBlank() }?.stripHtml()
+        ?: fallbackErrorMessage(status)
+    val params = json?.optJSONObject("data")?.optJSONObject("params")
+    return WooApiException(
+        code = code,
+        message = message,
+        status = status,
+        params = buildMap {
+            params?.keys()?.forEach { key -> put(key, params.optString(key).stripHtml()) }
+        },
+    )
+}
+
+private fun fallbackErrorCode(status: Int): String = when (status) {
+    401, 403 -> "woocommerce_rest_authentication_error"
+    404 -> "rest_no_route"
+    else -> "quicksale_http_$status"
+}
+
+private fun fallbackErrorMessage(status: Int): String = when (status) {
+    401, 403 -> "Your store rejected the API keys — check them in Settings"
+    404 -> "That endpoint wasn't found — is the organization accounts plugin active?"
+    in 500..599 -> "The store hit an error (HTTP $status) — try again shortly"
+    else -> "The store returned HTTP $status"
 }
 
 /** Strips the markup WordPress sometimes wraps around error messages. */

@@ -6,13 +6,18 @@ import kotlinx.coroutines.flow.map
 
 class OrganizationRepository(private val dao: OrganizationDao) {
 
-    fun pagingSource(query: String): PagingSource<Int, Organization> = dao.pagingSource(query.trim())
+    /** [status] is an [OrganizationStatus] slug, or blank for every status. */
+    fun pagingSource(query: String, status: String = ""): PagingSource<Int, Organization> =
+        dao.pagingSource(query.trim(), status)
 
-    fun countMatching(query: String): Flow<Int> = dao.countMatching(query.trim())
+    fun countMatching(query: String, status: String = ""): Flow<Int> =
+        dao.countMatching(query.trim(), status)
 
     fun organization(id: Long): Flow<Organization?> = dao.observeById(id)
 
     fun count(): Flow<Int> = dao.count()
+
+    fun countByStatus(status: OrganizationStatus): Flow<Int> = dao.countByStatus(status.slug)
 
     fun memberCount(): Flow<Int> = dao.memberCount()
 

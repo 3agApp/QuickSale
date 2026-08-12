@@ -96,6 +96,11 @@ data class Member(
 
     val roleLabel: String get() = if (isAdmin) "Admin" else "Member"
 
+    /** A membership is [STATUS_ACTIVE] or `inactive`; only an active one may be sold to. */
+    val isActive: Boolean get() = status.equals(STATUS_ACTIVE, ignoreCase = true)
+
+    val statusLabel: String get() = if (isActive) "Active" else "Inactive"
+
     val initials: String
         get() = name.split(' ')
             .filter { it.isNotBlank() }
@@ -123,6 +128,7 @@ data class Member(
 
     companion object {
         const val LOCATION_ACCESS_ALL = "all"
+        const val STATUS_ACTIVE = "active"
     }
 }
 
@@ -159,4 +165,38 @@ data class OrgLocation(
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .joinToString(", ")
+
+    /**
+     * This address under WooCommerce's own field names — the keys the address form renders and the
+     * order's `shipping` block is submitted with.
+     *
+     * A branch is a WooCommerce shipping address column for column, so filling a form from one is
+     * a rename and nothing more. [name] and [isDefault] are deliberately absent: they label the
+     * branch, they are not part of the address.
+     */
+    fun toAddressFields(): Map<String, String> = mapOf(
+        "first_name" to firstName,
+        "last_name" to lastName,
+        "company" to company,
+        "address_1" to address1,
+        "address_2" to address2,
+        "city" to city,
+        "state" to state,
+        "postcode" to postcode,
+        "country" to country,
+        "phone" to phone,
+    )
+
+    /**
+     * True when [values] is still this branch's own address.
+     *
+     * This is what decides whether an order names the branch by ID or posts a typed address, so it
+     * has to answer the question the operator would: a field the current country's form doesn't
+     * render is absent from [values] rather than blank, and absent-versus-blank is not a change.
+     * Surrounding whitespace isn't a change either — the store trims it too.
+     */
+    fun matchesAddress(values: Map<String, String>): Boolean =
+        toAddressFields().all { (field, saved) ->
+            saved.trim() == values[field].orEmpty().trim()
+        }
 }

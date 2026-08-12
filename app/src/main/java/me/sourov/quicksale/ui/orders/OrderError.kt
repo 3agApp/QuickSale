@@ -40,7 +40,7 @@ data class OrderError(
             )
 
             "woap_rest_shipping_destination" -> OrderError(
-                headline = "The store wouldn't accept that delivery location",
+                headline = "The store wouldn't deliver there",
                 detail = error.message,
                 suggestsSync = true,
             )

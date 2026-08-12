@@ -12,18 +12,26 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import me.sourov.quicksale.appContainer
+import me.sourov.quicksale.data.local.OrganizationStatus
 import me.sourov.quicksale.ui.home.HomeScreen
-import me.sourov.quicksale.ui.orders.NewOrderScreen
+import me.sourov.quicksale.ui.orders.CartScreen
+import me.sourov.quicksale.ui.orders.CheckoutScreen
+import me.sourov.quicksale.ui.orders.NewOrderViewModel
 import me.sourov.quicksale.ui.orders.OrderConfirmationScreen
 import me.sourov.quicksale.ui.organizations.OrganizationDetailScreen
 import me.sourov.quicksale.ui.organizations.OrganizationsScreen
+import me.sourov.quicksale.ui.organizations.PendingApprovalScreen
 import me.sourov.quicksale.ui.products.ProductDetailScreen
 import me.sourov.quicksale.ui.products.ProductsScreen
 import me.sourov.quicksale.ui.settings.SettingsScreen
@@ -43,13 +51,28 @@ object Routes {
     const val ORGANIZATION_ID_ARG = "organizationId"
     fun organizationDetail(id: Long) = "$ORGANIZATION_DETAIL/$id"
 
-    const val NEW_ORDER = "new_order"
-    const val MEMBER_USER_ID_ARG = "memberUserId"
-    const val NEW_ORDER_ROUTE = "$NEW_ORDER/{$ORGANIZATION_ID_ARG}/{$MEMBER_USER_ID_ARG}"
+    const val PENDING_REVIEW = "pending_review"
+    fun pendingReview(id: Long) = "$PENDING_REVIEW/$id"
 
-    /** An order is always for one member of one organization — both identify it. */
+    const val MEMBER_USER_ID_ARG = "memberUserId"
+
+    /**
+     * An order is two pages — the cart and the checkout — and they share one view model, scoped to
+     * the cart's back-stack entry. That is what lets the cart survive the hop to the checkout and
+     * the back gesture home again, so nothing is retyped and nothing is rung up twice.
+     *
+     * Both carry the same ids, because an order is always for one member of one organization.
+     */
+    const val CART = "cart"
+    const val CHECKOUT = "checkout"
+    const val CART_ROUTE = "$CART/{$ORGANIZATION_ID_ARG}/{$MEMBER_USER_ID_ARG}"
+    const val CHECKOUT_ROUTE = "$CHECKOUT/{$ORGANIZATION_ID_ARG}/{$MEMBER_USER_ID_ARG}"
+
     fun newOrder(organizationId: Long, memberUserId: Long) =
-        "$NEW_ORDER/$organizationId/$memberUserId"
+        "$CART/$organizationId/$memberUserId"
+
+    fun checkout(organizationId: Long, memberUserId: Long) =
+        "$CHECKOUT/$organizationId/$memberUserId"
 
     const val ORDER_CONFIRMATION = "order_confirmation"
     const val ORDER_ID_ARG = "orderId"
@@ -86,9 +109,16 @@ object Routes {
     private fun String.asRouteText(): String =
         java.net.URLEncoder.encode(this, "UTF-8").replace("+", "%20")
 
-    /** Routes that take over the whole screen (no global top bar / bottom nav). */
+    /**
+     * Routes that take over the whole screen (no global top bar / bottom nav).
+     *
+     * These are the screens that carry a decision in their own bottom bar — Place order, Approve —
+     * and a navigation bar stacked under one of those is two bars competing for the same thumb.
+     */
     fun isFullScreen(route: String?): Boolean =
-        route != null && (route.startsWith(NEW_ORDER) || route.startsWith(ORDER_CONFIRMATION))
+        route != null &&
+            (route.startsWith(CART) || route.startsWith(CHECKOUT) ||
+                route.startsWith(ORDER_CONFIRMATION) || route.startsWith(PENDING_REVIEW))
 }
 
 /**
@@ -167,14 +197,20 @@ fun QuickSaleNavHost(
         composable(TopLevelDestination.ORGANIZATIONS.route) {
             OrganizationsScreen(
                 query = organizationsQuery,
-                // An account with a single member has nothing to pick on its detail screen, so the
-                // tap goes where it was always heading: that member's order.
-                onOrganizationClick = { id, soleMemberUserId ->
-                    navController.navigate(
-                        soleMemberUserId
-                            ?.let { Routes.newOrder(id, it) }
-                            ?: Routes.organizationDetail(id),
-                    )
+                onOrganizationClick = { organization, soleMemberUserId ->
+                    val route = when {
+                        // An account waiting for approval isn't one you can sell to, so the tap
+                        // goes to the only useful thing: reviewing it.
+                        organization.orgStatus == OrganizationStatus.PENDING ->
+                            Routes.pendingReview(organization.id)
+
+                        // An account with a single member has nothing to pick on its detail
+                        // screen, so the tap goes where it was always heading: that member's order.
+                        soleMemberUserId != null -> Routes.newOrder(organization.id, soleMemberUserId)
+
+                        else -> Routes.organizationDetail(organization.id)
+                    }
+                    navController.navigate(route)
                 },
             )
         }
@@ -222,16 +258,37 @@ fun QuickSaleNavHost(
             )
         }
         composable(
-            route = Routes.NEW_ORDER_ROUTE,
-            arguments = listOf(
-                navArgument(Routes.ORGANIZATION_ID_ARG) { type = NavType.LongType },
-                navArgument(Routes.MEMBER_USER_ID_ARG) { type = NavType.LongType },
-            ),
+            route = "${Routes.PENDING_REVIEW}/{${Routes.ORGANIZATION_ID_ARG}}",
+            arguments = listOf(navArgument(Routes.ORGANIZATION_ID_ARG) { type = NavType.LongType }),
         ) { backStackEntry ->
-            val arguments = backStackEntry.arguments
-            NewOrderScreen(
-                organizationId = arguments?.getLong(Routes.ORGANIZATION_ID_ARG) ?: 0L,
-                memberUserId = arguments?.getLong(Routes.MEMBER_USER_ID_ARG) ?: 0L,
+            PendingApprovalScreen(
+                organizationId = backStackEntry.arguments?.getLong(Routes.ORGANIZATION_ID_ARG) ?: 0L,
+                onBack = { navController.popBackStack() },
+                onReviewed = { navController.popBackStack() },
+            )
+        }
+
+        // Page one of an order. The view model lives on this entry; the checkout borrows it.
+        composable(
+            route = Routes.CART_ROUTE,
+            arguments = orderArguments,
+        ) { entry ->
+            val ids = entry.orderIds()
+            CartScreen(
+                viewModel = orderViewModel(navController, ids),
+                onBack = { navController.popBackStack() },
+                onReviewOrder = {
+                    navController.navigate(Routes.checkout(ids.organizationId, ids.memberUserId))
+                },
+            )
+        }
+        composable(
+            route = Routes.CHECKOUT_ROUTE,
+            arguments = orderArguments,
+        ) { entry ->
+            val ids = entry.orderIds()
+            CheckoutScreen(
+                viewModel = orderViewModel(navController, ids),
                 onBack = { navController.popBackStack() },
                 onPlaced = { result ->
                     val route = Routes.orderConfirmation(
@@ -244,8 +301,11 @@ fun QuickSaleNavHost(
                         location = result.locationName,
                     )
                     navController.navigate(route) {
-                        // Don't return to the order builder when leaving the confirmation.
-                        popUpTo(Routes.NEW_ORDER_ROUTE) { inclusive = true }
+                        // Don't return to the cart or the checkout from the confirmation: the order
+                        // exists on the store, and a second Place would create a second order.
+                        popUpTo(Routes.newOrder(ids.organizationId, ids.memberUserId)) {
+                            inclusive = true
+                        }
                     }
                 },
             )
@@ -277,6 +337,51 @@ fun QuickSaleNavHost(
             )
         }
     }
+}
+
+/** Who an order is for. Both pages of it carry the pair, and the view model is keyed on it. */
+private data class OrderIds(val organizationId: Long, val memberUserId: Long)
+
+private val orderArguments = listOf(
+    navArgument(Routes.ORGANIZATION_ID_ARG) { type = NavType.LongType },
+    navArgument(Routes.MEMBER_USER_ID_ARG) { type = NavType.LongType },
+)
+
+private fun NavBackStackEntry.orderIds(): OrderIds = OrderIds(
+    organizationId = arguments?.getLong(Routes.ORGANIZATION_ID_ARG) ?: 0L,
+    memberUserId = arguments?.getLong(Routes.MEMBER_USER_ID_ARG) ?: 0L,
+)
+
+/**
+ * The one order view model both pages share.
+ *
+ * Scoped to the **cart's** back-stack entry rather than to whichever page is on screen, so the cart
+ * built on the first page is still there on the second — and still there when you come back to add
+ * the thing the customer remembered at the till.
+ */
+@Composable
+private fun orderViewModel(
+    navController: NavHostController,
+    ids: OrderIds,
+): NewOrderViewModel {
+    val context = LocalContext.current
+    val container = remember(context) { context.appContainer }
+    val cartEntry = remember(ids) {
+        navController.getBackStackEntry(Routes.newOrder(ids.organizationId, ids.memberUserId))
+    }
+    return viewModel(
+        viewModelStoreOwner = cartEntry,
+        factory = NewOrderViewModel.factory(
+            organizationId = ids.organizationId,
+            memberUserId = ids.memberUserId,
+            organizationRepository = container.organizations,
+            productRepository = container.products,
+            settingsRepository = container.settings,
+            orderSettingsRepository = container.orderSettings,
+            checkoutConfigRepository = container.checkoutConfig,
+            addressFormRepository = container.addressForms,
+        ),
+    )
 }
 
 /** Navigates to a top-level tab with the standard single-top / save-restore behaviour. */

@@ -13,28 +13,48 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import me.sourov.quicksale.data.local.Organization
 import me.sourov.quicksale.data.local.OrganizationRepository
+import me.sourov.quicksale.data.local.OrganizationStatus
 import me.sourov.quicksale.data.local.OrganizationTally
 
 class OrganizationsViewModel(private val repository: OrganizationRepository) : ViewModel() {
 
     private val _query = MutableStateFlow("")
 
+    private val _statusFilter = MutableStateFlow<OrganizationStatus?>(null)
+
+    /** The status the list is narrowed to, or null for every status. */
+    val statusFilter: StateFlow<OrganizationStatus?> = _statusFilter.asStateFlow()
+
+    /** Search text and status filter travel together — either one changing re-runs the query. */
+    private val criteria = combine(_query, _statusFilter) { query, status ->
+        query to status?.slug.orEmpty()
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
-    val organizations: Flow<PagingData<Organization>> = _query
-        .flatMapLatest { q ->
+    val organizations: Flow<PagingData<Organization>> = criteria
+        .flatMapLatest { (query, status) ->
             Pager(PagingConfig(pageSize = 30, enablePlaceholders = false)) {
-                repository.pagingSource(q)
+                repository.pagingSource(query, status)
             }.flow
         }
         .cachedIn(viewModelScope)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val matchingCount: StateFlow<Int> = _query
-        .flatMapLatest { q -> repository.countMatching(q) }
+    val matchingCount: StateFlow<Int> = criteria
+        .flatMapLatest { (query, status) -> repository.countMatching(query, status) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    /**
+     * How many accounts are waiting to be reviewed. Shown on the Pending chip so the queue is
+     * visible without switching to it — a registration nobody notices is one nobody approves.
+     */
+    val pendingCount: StateFlow<Int> = repository.countByStatus(OrganizationStatus.PENDING)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     /** Member/location counts for every organization, so rows don't each run their own query. */
@@ -49,6 +69,8 @@ class OrganizationsViewModel(private val repository: OrganizationRepository) : V
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     fun setQuery(value: String) { _query.value = value }
+
+    fun setStatusFilter(status: OrganizationStatus?) { _statusFilter.value = status }
 
     companion object {
         fun factory(repository: OrganizationRepository) = viewModelFactory {

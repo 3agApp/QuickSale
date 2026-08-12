@@ -1,6 +1,7 @@
 package me.sourov.quicksale.ui.organizations
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,13 +14,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Place
+import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.material.icons.outlined.ShoppingCartCheckout
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -40,6 +44,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import me.sourov.quicksale.appContainer
 import me.sourov.quicksale.data.local.Organization
+import me.sourov.quicksale.data.local.OrganizationStatus
 import me.sourov.quicksale.data.local.OrganizationTally
 import me.sourov.quicksale.data.sync.SyncManager
 import me.sourov.quicksale.data.sync.SyncTarget
@@ -54,14 +59,18 @@ import me.sourov.quicksale.ui.theme.Spacing
  * The organizations the till can sell to. This is the B2B replacement for the old customer list:
  * an order belongs to an organization first and a person second.
  *
- * [onOrganizationClick] receives the only member's user id for one-member accounts, so a tap can
- * skip the detail screen — see [OrganizationsViewModel.soleMembers].
+ * The status filter doubles as the review queue: **Pending** is the list of accounts waiting for
+ * somebody to approve them, which is the one thing on this screen that isn't about selling.
+ *
+ * [onOrganizationClick] receives the whole organization — the caller routes on its status — plus the
+ * only member's user id for one-member accounts, so a tap can skip the detail screen (see
+ * [OrganizationsViewModel.soleMembers]).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrganizationsScreen(
     query: String,
-    onOrganizationClick: (organizationId: Long, soleMemberUserId: Long?) -> Unit,
+    onOrganizationClick: (organization: Organization, soleMemberUserId: Long?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -75,6 +84,8 @@ fun OrganizationsScreen(
     val count by viewModel.matchingCount.collectAsStateWithLifecycle()
     val tallies by viewModel.tallies.collectAsStateWithLifecycle()
     val soleMembers by viewModel.soleMembers.collectAsStateWithLifecycle()
+    val statusFilter by viewModel.statusFilter.collectAsStateWithLifecycle()
+    val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle()
     val syncState by SyncManager.state(SyncTarget.Organizations).collectAsStateWithLifecycle()
 
     // Pull to refresh: the gesture the list already invites, wired to the same sync as everywhere.
@@ -84,13 +95,19 @@ fun OrganizationsScreen(
         modifier = modifier.fillMaxSize(),
     ) {
         Column(Modifier.fillMaxSize()) {
+            StatusFilterRow(
+                selected = statusFilter,
+                pendingCount = pendingCount,
+                onSelect = viewModel::setStatusFilter,
+            )
+
             Text(
                 text = "$count ${if (count == 1) "organization" else "organizations"}",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(
                     start = Spacing.screen,
-                    top = Spacing.md,
+                    top = Spacing.xs,
                     bottom = Spacing.xs,
                 ),
             )
@@ -103,6 +120,16 @@ fun OrganizationsScreen(
                     icon = Icons.Filled.Business,
                     title = "No matches",
                     message = "No organization matches \"$query\".",
+                )
+
+                organizations.itemCount == 0 && statusFilter != null -> EmptyState(
+                    icon = Icons.Filled.Business,
+                    title = "Nothing ${statusFilter?.label?.lowercase()}",
+                    message = if (statusFilter == OrganizationStatus.PENDING) {
+                        "No accounts are waiting for approval."
+                    } else {
+                        "No account is ${statusFilter?.label?.lowercase()} right now."
+                    },
                 )
 
                 organizations.itemCount == 0 -> EmptyState(
@@ -131,7 +158,7 @@ fun OrganizationsScreen(
                                 organization = organization,
                                 tally = tallies[organization.id],
                                 startsOrderDirectly = soleMemberUserId != null,
-                                onClick = { onOrganizationClick(organization.id, soleMemberUserId) },
+                                onClick = { onOrganizationClick(organization, soleMemberUserId) },
                             )
                         }
                     }
@@ -140,6 +167,55 @@ fun OrganizationsScreen(
         }
     }
 }
+
+/**
+ * Narrows the list to one lifecycle state. **Pending** carries its count because it is a queue:
+ * an account waiting for approval is work, and work nobody can see is work nobody does.
+ */
+@Composable
+private fun StatusFilterRow(
+    selected: OrganizationStatus?,
+    pendingCount: Int,
+    onSelect: (OrganizationStatus?) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = Spacing.screen, vertical = Spacing.sm),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        FilterChip(
+            selected = selected == null,
+            onClick = { onSelect(null) },
+            label = { Text("All") },
+        )
+        FILTERABLE_STATUSES.forEach { status ->
+            val isPending = status == OrganizationStatus.PENDING
+            FilterChip(
+                selected = selected == status,
+                onClick = { onSelect(status) },
+                label = {
+                    Text(
+                        if (isPending && pendingCount > 0) {
+                            "${status.label} ($pendingCount)"
+                        } else {
+                            status.label
+                        },
+                    )
+                },
+            )
+        }
+    }
+}
+
+/** [OrganizationStatus.UNKNOWN] is not a status the store can hold, so it isn't offered. */
+private val FILTERABLE_STATUSES = listOf(
+    OrganizationStatus.PENDING,
+    OrganizationStatus.ACTIVE,
+    OrganizationStatus.SUSPENDED,
+    OrganizationStatus.REJECTED,
+)
 
 @Composable
 private fun OrganizationRow(
@@ -176,26 +252,29 @@ private fun OrganizationRow(
                     Tally(
                         icon = Icons.Outlined.Place,
                         value = tally?.locationCount ?: 0,
-                        singular = "location",
+                        singular = "branch",
+                        plural = "branches",
                     )
                 }
                 Spacer(Modifier.height(Spacing.sm))
                 OrganizationStatusChip(organization.orgStatus)
             }
-            // A one-member account goes straight to its order, so the row is coloured like the
-            // action it performs rather than like a step into another list.
+            // The row is coloured like the action it performs rather than like a step into another
+            // list: a pending account opens its review, a one-member account goes straight to its
+            // order, and everything else steps into the member list.
+            val pending = organization.orgStatus == OrganizationStatus.PENDING
             Icon(
-                imageVector = if (startsOrderDirectly) {
-                    Icons.Outlined.ShoppingCartCheckout
-                } else {
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight
+                imageVector = when {
+                    pending -> Icons.Outlined.RateReview
+                    startsOrderDirectly -> Icons.Outlined.ShoppingCartCheckout
+                    else -> Icons.AutoMirrored.Filled.KeyboardArrowRight
                 },
-                contentDescription = if (startsOrderDirectly) {
-                    "Start an order for ${organization.name}"
-                } else {
-                    null
+                contentDescription = when {
+                    pending -> "Review ${organization.name}"
+                    startsOrderDirectly -> "Start an order for ${organization.name}"
+                    else -> null
                 },
-                tint = if (startsOrderDirectly) {
+                tint = if (pending || startsOrderDirectly) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -211,6 +290,7 @@ private fun Tally(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     value: Int,
     singular: String,
+    plural: String = "${singular}s",
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(
@@ -221,7 +301,7 @@ private fun Tally(
         )
         Spacer(Modifier.width(4.dp))
         Text(
-            text = "$value ${if (value == 1) singular else "${singular}s"}",
+            text = "$value ${if (value == 1) singular else plural}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

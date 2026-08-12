@@ -11,36 +11,42 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface OrganizationDao {
 
+    /** An empty [status] means every status, matching how an empty [query] means every row. */
     @Query(
         """
         SELECT * FROM organizations
-        WHERE :query = ''
+        WHERE (:query = ''
            OR name LIKE '%' || :query || '%'
            OR email LIKE '%' || :query || '%'
            OR city LIKE '%' || :query || '%'
-           OR phone LIKE '%' || :query || '%'
+           OR phone LIKE '%' || :query || '%')
+          AND (:status = '' OR status = :status)
         ORDER BY name COLLATE NOCASE
         """
     )
-    fun pagingSource(query: String): PagingSource<Int, Organization>
+    fun pagingSource(query: String, status: String): PagingSource<Int, Organization>
 
     @Query(
         """
         SELECT COUNT(*) FROM organizations
-        WHERE :query = ''
+        WHERE (:query = ''
            OR name LIKE '%' || :query || '%'
            OR email LIKE '%' || :query || '%'
            OR city LIKE '%' || :query || '%'
-           OR phone LIKE '%' || :query || '%'
+           OR phone LIKE '%' || :query || '%')
+          AND (:status = '' OR status = :status)
         """
     )
-    fun countMatching(query: String): Flow<Int>
+    fun countMatching(query: String, status: String): Flow<Int>
 
     @Query("SELECT * FROM organizations WHERE id = :id")
     fun observeById(id: Long): Flow<Organization?>
 
     @Query("SELECT COUNT(*) FROM organizations")
     fun count(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM organizations WHERE status = :status")
+    fun countByStatus(status: String): Flow<Int>
 
     @Query("SELECT COUNT(*) FROM org_members")
     fun memberCount(): Flow<Int>

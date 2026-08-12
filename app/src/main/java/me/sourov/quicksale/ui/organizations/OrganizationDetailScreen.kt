@@ -1,12 +1,10 @@
 package me.sourov.quicksale.ui.organizations
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -14,12 +12,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.MailOutline
-import androidx.compose.material.icons.outlined.Place
-import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,23 +24,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import me.sourov.quicksale.appContainer
-import me.sourov.quicksale.data.local.Member
-import me.sourov.quicksale.data.local.OrgLocation
 import me.sourov.quicksale.data.local.Organization
 import me.sourov.quicksale.data.sync.SyncManager
 import me.sourov.quicksale.data.sync.SyncTarget
 import me.sourov.quicksale.ui.components.EmptyState
-import me.sourov.quicksale.ui.components.IconBadge
 import me.sourov.quicksale.ui.components.LoadingState
 import me.sourov.quicksale.ui.components.Monogram
 import me.sourov.quicksale.ui.components.QuickSaleCard
 import me.sourov.quicksale.ui.components.SectionHeader
-import me.sourov.quicksale.ui.components.StatusChip
 import me.sourov.quicksale.ui.components.SyncIconButton
 import me.sourov.quicksale.ui.theme.Sizes
 import me.sourov.quicksale.ui.theme.Spacing
@@ -150,9 +140,9 @@ fun OrganizationDetailScreen(
 
         Spacer(Modifier.height(Spacing.sectionSpacing))
         SectionHeader(
-            title = "Delivery locations",
+            title = "Branches",
             subtitle = if (current.allowCustomShipping) {
-                "One-off addresses are allowed too"
+                "An order may also be sent to a typed address"
             } else {
                 "Orders must ship to one of these"
             },
@@ -161,7 +151,7 @@ fun OrganizationDetailScreen(
         if (locations.isEmpty()) {
             QuickSaleCard {
                 Text(
-                    text = "No saved locations.",
+                    text = "No saved branches.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(Spacing.lg),
@@ -169,7 +159,7 @@ fun OrganizationDetailScreen(
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                locations.forEach { LocationRow(it) }
+                locations.forEach { LocationRow(location = it) }
             }
         }
 
@@ -245,138 +235,3 @@ private fun OrganizationHeader(
     }
 }
 
-@Composable
-private fun MemberRow(
-    member: Member,
-    organizationCanTrade: Boolean,
-    onClick: () -> Unit,
-) {
-    // can_place_orders is the store's own resolved answer, shown as given. The organization's
-    // status gates it too: an active member of a suspended account still can't buy.
-    val canOrder = member.canPlaceOrders && organizationCanTrade
-    QuickSaleCard(
-        modifier = Modifier.clickable(enabled = canOrder, onClick = onClick),
-    ) {
-        Row(
-            modifier = Modifier.padding(Spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Monogram(
-                initials = member.initials,
-                containerColor = if (canOrder) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant
-                },
-                contentColor = if (canOrder) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-            Spacer(Modifier.width(Spacing.md))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = member.name.ifBlank { member.email },
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    if (member.isAdmin) {
-                        Spacer(Modifier.width(Spacing.sm))
-                        StatusChip(
-                            label = member.roleLabel,
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        )
-                    }
-                }
-                if (member.email.isNotBlank() && member.name.isNotBlank()) {
-                    Text(
-                        text = member.email,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (!canOrder) {
-                    Spacer(Modifier.height(Spacing.xs))
-                    Text(
-                        text = if (!organizationCanTrade) {
-                            "Blocked by the account's status"
-                        } else {
-                            "Not allowed to place orders"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                } else {
-                    member.allowedLocationIds?.let { allowed ->
-                        Spacer(Modifier.height(Spacing.xs))
-                        Text(
-                            text = "Can deliver to ${allowed.size} of the saved locations",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-            if (canOrder) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = "Start an order for ${member.name}",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(Sizes.iconLarge),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LocationRow(location: OrgLocation) {
-    QuickSaleCard {
-        Row(
-            modifier = Modifier.padding(Spacing.md),
-            verticalAlignment = Alignment.Top,
-        ) {
-            IconBadge(
-                icon = Icons.Outlined.Place,
-                size = Sizes.avatarSmall,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(Spacing.md))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = location.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    if (location.isDefault) {
-                        Spacer(Modifier.width(Spacing.sm))
-                        StatusChip(
-                            label = "Default",
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                            icon = Icons.Outlined.Star,
-                        )
-                    }
-                }
-                if (location.formatted.isNotBlank()) {
-                    Spacer(Modifier.height(Spacing.xs))
-                    Text(
-                        text = location.formatted,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}

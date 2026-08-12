@@ -35,12 +35,12 @@ class OrderErrorTest {
     @Test
     fun `a rejected destination suggests a re-sync`() {
         val error = OrderError.from(apiError("woap_rest_shipping_destination"))
-        assertEquals("The store wouldn't accept that delivery location", error.headline)
+        assertEquals("The store wouldn't deliver there", error.headline)
         assertTrue(error.suggestsSync)
     }
 
     @Test
-    fun `a bad one-off address is the operator's to fix, not a sync problem`() {
+    fun `a bad typed address is the operator's to fix, not a sync problem`() {
         val error = OrderError.from(apiError("woap_rest_shipping_address"))
         assertEquals("The delivery address needs fixing", error.headline)
         assertFalse(error.suggestsSync)

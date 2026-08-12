@@ -113,6 +113,93 @@ class WoapApi(settings: StoreSettings) {
         )
     }
 
+    /**
+     * The answer to a status write. [changed] is false when the organization already held that
+     * status — a success, not an error: two people working the same queue, or one double-tap, must
+     * not produce two approval emails.
+     */
+    class StatusChange(val changed: Boolean, val organization: Organization?)
+
+    /**
+     * Moves an organization through its lifecycle — `pending`, `active`, `suspended`, `rejected`.
+     *
+     * This is its own route rather than a field on the edit because it is what sends the shop's
+     * approval and rejection mail; `PATCH`ing an organization with a status is refused outright, so
+     * every status write in the app goes through here.
+     */
+    suspend fun setOrganizationStatus(organizationId: Long, status: String): StatusChange {
+        val response = http.post(
+            path = "wc-woap/v1/organizations/$organizationId/status",
+            body = JSONObject().put("status", status),
+        )
+        val json = JSONObject(response.body)
+        return StatusChange(
+            changed = json.optBoolean("changed"),
+            organization = json.optJSONObject("organization")?.toOrganization(),
+        )
+    }
+
+    /**
+     * Sets one membership's status — `active` or `inactive`.
+     *
+     * Only `status` is sent. Permissions are stored as a diff against the role, so echoing back a
+     * capability map read for a previous role would pin the member to permissions their role has
+     * moved away from.
+     */
+    suspend fun setMemberStatus(organizationId: Long, memberId: Long, status: String): Member {
+        val response = http.patch(
+            path = "wc-woap/v1/organizations/$organizationId/members/$memberId",
+            body = JSONObject().put("status", status),
+        )
+        return JSONObject(response.body).toMember(organizationId)
+    }
+
+    /**
+     * Adds a branch. [fields] carries WooCommerce's own shipping field names at the top level of
+     * the body, matching how the snapshot reports them.
+     *
+     * `name` is required; a surname and a phone are not, even where the shop's checkout requires a
+     * phone of a buyer. A blank `company` becomes the organization's name, stored rather than
+     * resolved later.
+     */
+    suspend fun createLocation(
+        organizationId: Long,
+        name: String,
+        isDefault: Boolean,
+        fields: Map<String, String>,
+    ): OrgLocation {
+        val response = http.post(
+            path = "wc-woap/v1/organizations/$organizationId/locations",
+            body = locationBody(name, isDefault, fields),
+        )
+        return JSONObject(response.body).toLocation(organizationId)
+    }
+
+    /** Edits a branch. The edit is partial, but the merged address is validated whole. */
+    suspend fun updateLocation(
+        organizationId: Long,
+        locationId: Long,
+        name: String,
+        isDefault: Boolean,
+        fields: Map<String, String>,
+    ): OrgLocation {
+        val response = http.patch(
+            path = "wc-woap/v1/organizations/$organizationId/locations/$locationId",
+            body = locationBody(name, isDefault, fields),
+        )
+        return JSONObject(response.body).toLocation(organizationId)
+    }
+
+    private fun locationBody(
+        name: String,
+        isDefault: Boolean,
+        fields: Map<String, String>,
+    ): JSONObject = JSONObject().apply {
+        put("name", name)
+        put("is_default", isDefault)
+        fields.forEach { (key, value) -> put(key, value) }
+    }
+
     private fun JSONObject.toOrganization(): Organization {
         val billing = optJSONObject("billing")
         return Organization(
