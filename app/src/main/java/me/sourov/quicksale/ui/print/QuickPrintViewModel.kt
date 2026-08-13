@@ -119,6 +119,7 @@ class QuickPrintViewModel(
                     copies = settings.copies,
                     feedLines = settings.spacing,
                     blackMark = settings.feedsToNextLabel,
+                    density = settings.density,
                 )
             }
             _state.value = when (result) {

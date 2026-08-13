@@ -11,16 +11,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.sourov.quicksale.data.settings.LabelMedia
+import me.sourov.quicksale.data.settings.LabelSettings
+import kotlin.math.roundToInt
 
 @Composable
 fun LabelSettingsSection(
@@ -58,6 +64,12 @@ fun LabelSettingsSection(
         }
 
         Spacer(Modifier.height(12.dp))
+        DensityRow(
+            density = settings.density,
+            onChange = viewModel::setDensity,
+        )
+
+        Spacer(Modifier.height(12.dp))
         Text(
             text = "Fields",
             style = MaterialTheme.typography.labelLarge,
@@ -77,6 +89,53 @@ fun LabelSettingsSection(
         Text(
             text = "Fields print in this order, and a product missing one simply skips it. The " +
                 "barcode is always the product's EAN — never the SKU.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * How dark the printer burns, on its own 1–11 scale.
+ *
+ * The number is shown rather than hidden behind words like "darker": setting this is a matter of
+ * printing one label, looking at it and nudging, and a value you can read back is what makes the
+ * second attempt an adjustment instead of a guess — and what lets one till be matched to another
+ * over the phone.
+ *
+ * The drag is kept local and only written when the finger lifts, so a slide from one end of the
+ * scale to the other is one saved setting rather than ten.
+ */
+@Composable
+private fun DensityRow(density: Int, onChange: (Int) -> Unit) {
+    var value by remember(density) { mutableFloatStateOf(density.toFloat()) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = "Print darkness",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "${value.roundToInt()}",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = { value = it },
+            onValueChangeFinished = { onChange(value.roundToInt()) },
+            valueRange = LabelSettings.MIN_DENSITY.toFloat()..LabelSettings.MAX_DENSITY.toFloat(),
+            steps = LabelSettings.MAX_DENSITY - LabelSettings.MIN_DENSITY - 1,
+        )
+        Text(
+            text = "Raise this if labels come out grey or the barcode won't scan. Too high and the " +
+                "bars bleed into each other, which stops a scan just as surely.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

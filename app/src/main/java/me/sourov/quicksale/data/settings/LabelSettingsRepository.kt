@@ -25,6 +25,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
         val SHOW_PRICE = booleanPreferencesKey("label_show_price")
         val SHOW_MSRP = booleanPreferencesKey("label_show_msrp")
         val MEDIA = stringPreferencesKey("label_media")
+        val DENSITY = intPreferencesKey("label_density")
         val COPIES = intPreferencesKey("label_copies")
         val SPACING = intPreferencesKey("label_spacing")
     }
@@ -43,6 +44,7 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
                 showPrice = prefs[Keys.SHOW_PRICE] ?: defaults.showPrice,
                 showMsrp = prefs[Keys.SHOW_MSRP] ?: defaults.showMsrp,
                 media = LabelMedia.fromSlug(prefs[Keys.MEDIA]),
+                density = prefs[Keys.DENSITY] ?: defaults.density,
                 copies = prefs[Keys.COPIES] ?: defaults.copies,
                 spacing = prefs[Keys.SPACING] ?: defaults.spacing,
             )
@@ -57,6 +59,9 @@ class LabelSettingsRepository(private val dataStore: DataStore<Preferences>) {
     suspend fun setShowPrice(value: Boolean) = edit(Keys.SHOW_PRICE, value)
     suspend fun setShowMsrp(value: Boolean) = edit(Keys.SHOW_MSRP, value)
     suspend fun setMedia(value: LabelMedia) = edit(Keys.MEDIA, value.slug)
+
+    suspend fun setDensity(value: Int) =
+        edit(Keys.DENSITY, value.coerceIn(LabelSettings.MIN_DENSITY, LabelSettings.MAX_DENSITY))
 
     suspend fun setCopies(value: Int) =
         edit(Keys.COPIES, value.coerceIn(LabelSettings.MIN_COPIES, LabelSettings.MAX_COPIES))

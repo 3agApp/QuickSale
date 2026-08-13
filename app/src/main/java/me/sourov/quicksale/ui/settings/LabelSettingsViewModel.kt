@@ -28,6 +28,7 @@ class LabelSettingsViewModel(
     fun setShowPrice(value: Boolean) = persist { repository.setShowPrice(value) }
     fun setShowMsrp(value: Boolean) = persist { repository.setShowMsrp(value) }
     fun setMedia(value: LabelMedia) = persist { repository.setMedia(value) }
+    fun setDensity(value: Int) = persist { repository.setDensity(value) }
 
     private fun persist(block: suspend () -> Unit) {
         viewModelScope.launch { block() }

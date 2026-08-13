@@ -58,6 +58,16 @@ data class LabelSettings(
      */
     val showMsrp: Boolean = true,
     val media: LabelMedia = LabelMedia.DIE_CUT,
+    /**
+     * How hard the head burns each dot, on the firmware's own 1–11 scale.
+     *
+     * Set on every job for the same reason the media mode is: density is a device-wide setting
+     * (`Settings.Global.print_density`), so a printer left alone burns at whatever the last app to
+     * touch it chose, and two terminals of the same model do not agree. A job that did not say
+     * otherwise would print at the device's value — which is how one till turns out crisp labels
+     * while another prints grey ones with bars dropped out of the barcode.
+     */
+    val density: Int = DEFAULT_DENSITY,
     val copies: Int = 1,
     val spacing: Int = 3,
 ) {
@@ -69,5 +79,20 @@ data class LabelSettings(
         const val MAX_COPIES = 9
         const val MIN_SPACING = 0
         const val MAX_SPACING = 12
+
+        /**
+         * The firmware's own darkness scale, mirrored from its `PrintConfig$Density` constants —
+         * `TOP_GRAY_SMALL` = 1 through `TOP_GRAY_LARGEST` = 11.
+         *
+         * [DEFAULT_DENSITY] deliberately sits above the 3 the hardware ships at. The margin is
+         * there for the things that quietly steal burn energy in a working day — a low battery, a
+         * head that has warmed up over a batch, a roll of cheaper stock — and it stops short of the
+         * top of the scale, where the burn spreads past the dot and thickens every bar into its
+         * neighbour. Both ends of that trade fail as an unscannable barcode, which is why this is
+         * adjustable rather than simply set as high as it will go.
+         */
+        const val MIN_DENSITY = 1
+        const val MAX_DENSITY = 11
+        const val DEFAULT_DENSITY = 6
     }
 }

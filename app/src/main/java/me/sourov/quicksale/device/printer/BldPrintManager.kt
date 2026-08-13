@@ -36,18 +36,53 @@ class BldPrintManager private constructor(
         .getOrNull().orEmpty()
 
     /**
-     * The firmware's own printer state, or null when it won't say.
+     * What the printer says is wrong, as one of the firmware's `IErrorCode` values, or null when
+     * the call itself fails. It is the one thing that separates "out of paper" from "couldn't find
+     * the label" after a failed job.
      *
-     * The meaning of each code is undocumented — the vendor's constants live in
-     * `android.bld.print.configuration.PrintConfig$StateType`, which is not on our classpath — so
-     * this is carried into error messages as a raw number rather than interpreted. It is the one
-     * thing that distinguishes "out of paper" from "couldn't find the label" after a failed job.
+     * [check] chooses which part of the printer to ask about, from the firmware's
+     * `PrintConfig$StateType` — the parts can be asked after individually (busy, temperature,
+     * paper, feed, print, black mark), but [CHECK_ALL] reports the first fault it finds, which is
+     * what an error path wants rather than a guess to confirm.
      */
-    fun state(): Int? = runCatching { method("getPrinterState").invoke(instance) as? Int }.getOrNull()
+    fun state(check: Int = CHECK_ALL): Int? =
+        runCatching { method("getPrinterState", intType).invoke(instance, check) as? Int }
+            .getOrNull()
 
     companion object {
         const val WIDTH_PIXEL = 384
         const val ALIGN_CENTER = 2
+
+        /**
+         * The bounds [setDensity] accepts, read off the firmware's own `PrintConfig$Density`
+         * constants on the device — `TOP_GRAY_SMALL` = 1 through `TOP_GRAY_LARGEST` = 11. (The
+         * copy of that class bundled in the vendor's demo app stops at 10; the one on the boot
+         * classpath is the one the printer actually answers to.) Out-of-range values are not worth
+         * finding out about through reflection, so callers are clamped to these.
+         */
+        const val MIN_DENSITY = 1
+        const val MAX_DENSITY = 11
+
+        /** `PrintConfig$StateType.CHECK_ALL` — see [state]. */
+        const val CHECK_ALL = 1
+
+        /**
+         * The `IErrorCode` values [state] answers with. Only the ones worth saying out loud are
+         * named here; the rest keep their number, because a wrong guess at what a code means is
+         * worse to read on a till than a number the vendor can look up.
+         */
+        const val ERROR_NONE = 0
+        const val ERROR_BUSY = 1
+        const val ERROR_HOT = 2
+        const val ERROR_NO_PAPER = 3
+        const val ERROR_NO_BATTERY = 4
+        const val ERROR_FEED = 5
+        const val ERROR_PRINT = 6
+        const val ERROR_BLACK_MARK = 7
+        const val ERROR_NOT_OPEN = 16
+        const val ERROR_DENSITY_INVALID = 20
+        const val ERROR_BITMAP_TOO_WIDE = 164
+        const val ERROR_TIMEOUT = 169
 
         private const val CLASS = "android.bld.PrintManager"
         private const val TAG = "BldPrintManager"

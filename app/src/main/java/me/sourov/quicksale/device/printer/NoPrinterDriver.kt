@@ -11,5 +11,6 @@ class NoPrinterDriver : PrinterDriver {
         copies: Int,
         feedLines: Int,
         blackMark: Boolean,
+        density: Int,
     ): PrintResult = PrintResult.Error("This device has no printer")
 }
