@@ -103,8 +103,14 @@ jobs:
             exit 1
           fi
 
+          # A `path#label` argument sets the asset's *display label*; the asset is still named
+          # after the file on disk, which is why every release so far shipped `app-release.apk`.
+          # Copying it to the name we want is what actually renames the download.
+          ASSET_PATH="$RUNNER_TEMP/QuickSale-$TAG_NAME.apk"
+          cp "$APK_PATH" "$ASSET_PATH"
+
           gh release create "$TAG_NAME" \
-            "$APK_PATH#QuickSale-$TAG_NAME.apk" \
+            "$ASSET_PATH" \
             --title "QuickSale $VERSION_NAME" \
             --generate-notes \
             --target "$GITHUB_SHA"
