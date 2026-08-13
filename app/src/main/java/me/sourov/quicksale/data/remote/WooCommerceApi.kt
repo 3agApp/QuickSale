@@ -90,7 +90,13 @@ class WooCommerceApi(settings: StoreSettings) {
      * present with a positive [quantity] it updates that line, present with `quantity = 0` it
      * removes the line, and absent it adds a new line. Order creation never sets it.
      */
-    data class LineItem(val productId: Long, val quantity: Int, val id: Long? = null)
+    data class LineItem(
+        val productId: Long,
+        val quantity: Int,
+        val id: Long? = null,
+        val subtotal: String? = null,
+        val total: String? = null,
+    )
 
     /** A shipping charge to attach to an order. [total] is the net (pre-tax) amount. */
     data class ShippingSelection(val methodId: String, val methodTitle: String, val total: String)
@@ -304,6 +310,10 @@ class WooCommerceApi(settings: StoreSettings) {
      * quantity updates that line, one with an id and `quantity = 0` removes it, and one with no id
      * adds a new line — see [LineItem]. Sending only what changed means a line nobody touched is
      * never re-priced by a round trip through this call.
+     *
+     * [LineItem.subtotal]/[LineItem.total] must be sent for quantity changes on an *existing* line:
+     * WooCommerce only auto-prices a line item when it's created, so an update that sends quantity
+     * alone changes the count but leaves the line — and the order total — at its old price.
      */
     suspend fun updateOrderLineItems(id: Long, lineItems: List<LineItem>): OrderDetail {
         val payload = JSONObject().put(
@@ -314,6 +324,8 @@ class WooCommerceApi(settings: StoreSettings) {
                         item.id?.let { put("id", it) }
                         put("product_id", item.productId)
                         put("quantity", item.quantity)
+                        item.subtotal?.let { put("subtotal", it) }
+                        item.total?.let { put("total", it) }
                     })
                 }
             },

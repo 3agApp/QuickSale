@@ -20,6 +20,7 @@ import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.data.scanner.ScannerHub
 import me.sourov.quicksale.data.settings.SettingsRepository
 import java.math.BigDecimal
+import java.math.RoundingMode
 
 /**
  * One line of an order being edited.
@@ -216,6 +217,10 @@ class OrderDetailViewModel(
      * lines are sent with `quantity = 0`, changed quantities are sent by id, and new lines are sent
      * without one — see [WooCommerceApi.updateOrderLineItems]. A line nobody touched is never
      * resent, so the store never re-prices something that didn't change.
+     *
+     * Quantity changes and new lines both carry an explicit subtotal/total: WooCommerce only
+     * auto-prices a line when it's created, so a quantity-only update to an existing line would
+     * otherwise leave that line — and the order total — at its old price.
      */
     fun saveChanges() {
         if (_saving.value) return
@@ -232,11 +237,28 @@ class OrderDetailViewModel(
             editedById.forEach { (id, line) ->
                 val was = originalById[id] ?: return@forEach
                 if (was.quantity != line.quantity) {
-                    add(WooCommerceApi.LineItem(productId = line.productId, quantity = line.quantity, id = id))
+                    val lineTotal = line.lineTotal.setScale(2, RoundingMode.HALF_UP).toPlainString()
+                    add(
+                        WooCommerceApi.LineItem(
+                            productId = line.productId,
+                            quantity = line.quantity,
+                            id = id,
+                            subtotal = lineTotal,
+                            total = lineTotal,
+                        ),
+                    )
                 }
             }
             edited.filter { it.itemId == null }.forEach { line ->
-                add(WooCommerceApi.LineItem(productId = line.productId, quantity = line.quantity))
+                val lineTotal = line.lineTotal.setScale(2, RoundingMode.HALF_UP).toPlainString()
+                add(
+                    WooCommerceApi.LineItem(
+                        productId = line.productId,
+                        quantity = line.quantity,
+                        subtotal = lineTotal,
+                        total = lineTotal,
+                    ),
+                )
             }
         }
 
