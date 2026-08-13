@@ -144,7 +144,7 @@ object Routes {
      * Distinct from [isFullScreen]: these keep the bottom navigation, because they are reached from
      * a tab and leaving them for another tab is a normal thing to want.
      */
-    private val OWN_TOP_BAR_ROUTES = setOf(ORDER_LIST, ORDER_DETAIL)
+    private val OWN_TOP_BAR_ROUTES = setOf(ORDER_LIST, ORDER_DETAIL, ORGANIZATION_DETAIL)
 
     fun ownsTopBar(route: String?): Boolean = route?.toRouteBase() in OWN_TOP_BAR_ROUTES
 
@@ -300,6 +300,7 @@ fun QuickSaleNavHost(
                 sellViewModel = sellViewModel,
                 onStarted = navController::returnToSell,
                 onViewOrders = { navController.navigate(Routes.orderList(id)) },
+                onBack = { navController.popBackStack() },
             )
         }
         composable(
@@ -419,6 +420,7 @@ private fun OrganizationDetail(
     sellViewModel: SellViewModel,
     onStarted: () -> Unit,
     onViewOrders: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val lines by sellViewModel.lines.collectAsStateWithLifecycle()
     val customer by sellViewModel.customer.collectAsStateWithLifecycle()
@@ -438,6 +440,7 @@ private fun OrganizationDetail(
             if (occupied) pendingMemberUserId = memberUserId else start(memberUserId)
         },
         onViewOrders = onViewOrders,
+        onBack = onBack,
     )
 
     pendingMemberUserId?.let { memberUserId ->

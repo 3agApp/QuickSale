@@ -37,7 +37,7 @@ import me.sourov.quicksale.data.local.OrgLocation
 import me.sourov.quicksale.ui.components.Monogram
 import me.sourov.quicksale.ui.components.QuickSaleCard
 import me.sourov.quicksale.ui.components.SectionHeader
-import me.sourov.quicksale.ui.organizations.BranchFormSheet
+import me.sourov.quicksale.ui.organizations.LocationFormSheet
 import me.sourov.quicksale.ui.organizations.LocationRow
 import me.sourov.quicksale.ui.organizations.OrganizationStatusChip
 import me.sourov.quicksale.ui.theme.Sizes
@@ -47,10 +47,10 @@ import me.sourov.quicksale.ui.theme.Spacing
  * The account behind the order in hand: who it bills to, and where it can be delivered.
  *
  * Reachable from the cart and the checkout, because the question it answers — "is this the right
- * company, and do they have the branch I'm looking for?" — comes up mid-order, and leaving the
+ * company, and do they have the location I'm looking for?" — comes up mid-order, and leaving the
  * order to find out means losing the cart.
  *
- * Branches are editable from here and only from here. An edit made in the checkout's delivery form
+ * Locations are editable from here and only from here. An edit made in the checkout's delivery form
  * belongs to that one order; an edit made here is the company's record changing.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -60,10 +60,10 @@ fun CompanySheet(
     onDismiss: () -> Unit,
 ) {
     val organization by viewModel.organization.collectAsStateWithLifecycle()
-    val branches by viewModel.allLocations.collectAsStateWithLifecycle()
+    val locations by viewModel.allLocations.collectAsStateWithLifecycle()
 
-    /** Null when no branch form is open; holds "add" (null branch) or the branch being edited. */
-    var editing by remember { mutableStateOf<BranchEdit?>(null) }
+    /** Null when no location form is open; holds "add" (null location) or the location being edited. */
+    var editing by remember { mutableStateOf<LocationEdit?>(null) }
 
     val current = organization ?: return
 
@@ -124,7 +124,7 @@ fun CompanySheet(
 
             Spacer(Modifier.height(Spacing.sectionSpacing))
             SectionHeader(
-                title = "Branches",
+                title = "Locations",
                 subtitle = if (current.allowCustomShipping) {
                     "Saved on the account. An order may also go to a typed address."
                 } else {
@@ -133,10 +133,10 @@ fun CompanySheet(
             )
             Spacer(Modifier.height(Spacing.sectionGap))
 
-            if (branches.isEmpty()) {
+            if (locations.isEmpty()) {
                 QuickSaleCard {
                     Text(
-                        text = "No branches yet. Add one and every order can be sent there.",
+                        text = "No locations yet. Add one and every order can be sent there.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(Spacing.md),
@@ -144,10 +144,10 @@ fun CompanySheet(
                 }
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                    branches.forEach { branch ->
+                    locations.forEach { location ->
                         LocationRow(
-                            location = branch,
-                            onEdit = { editing = BranchEdit(branch) },
+                            location = location,
+                            onEdit = { editing = LocationEdit(location) },
                         )
                     }
                 }
@@ -155,30 +155,30 @@ fun CompanySheet(
 
             Spacer(Modifier.height(Spacing.md))
             OutlinedButton(
-                onClick = { editing = BranchEdit(null) },
+                onClick = { editing = LocationEdit(null) },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(Spacing.sm))
-                Text("Add a branch")
+                Text("Add a location")
             }
         }
     }
 
     editing?.let { edit ->
-        BranchFormSheet(
+        LocationFormSheet(
             organizationId = current.id,
-            existing = edit.branch,
+            existing = edit.location,
             onDismiss = { editing = null },
-            // The branch form applies the saved row locally, which is what makes it appear in
+            // The location form applies the saved row locally, which is what makes it appear in
             // this list — and in the delivery picker of the order being built behind it.
             onSaved = { editing = null },
         )
     }
 }
 
-/** Which branch form is open: [branch] is null when adding a new one. */
-private data class BranchEdit(val branch: OrgLocation?)
+/** Which location form is open: [location] is null when adding a new one. */
+private data class LocationEdit(val location: OrgLocation?)
 
 @Composable
 private fun ContactLine(icon: ImageVector, text: String) {

@@ -84,6 +84,25 @@ class WooHttp(private val settings: StoreSettings) {
         methodOverride = "PATCH",
     )
 
+    /**
+     * `DELETE https://site/wp-json/[path]`.
+     *
+     * Overridden the same way [patch] is, and for the same reason: `HttpURLConnection` will issue a
+     * DELETE but not one carrying a body, and routing every write through one mechanism means one
+     * thing to check when a host's proxy starts eating verbs.
+     */
+    suspend fun delete(
+        path: String,
+        query: Map<String, String> = emptyMap(),
+    ): WooResponse = request(
+        method = "POST",
+        path = path,
+        query = query,
+        body = null,
+        ifNoneMatch = null,
+        methodOverride = "DELETE",
+    )
+
     private suspend fun request(
         method: String,
         path: String,

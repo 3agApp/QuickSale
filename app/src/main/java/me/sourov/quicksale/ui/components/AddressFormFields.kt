@@ -35,7 +35,7 @@ import me.sourov.quicksale.ui.theme.Spacing
  * real rules (postcode format, states from the country's list) and its answers are authoritative.
  *
  * Both places the app composes an address use this: the delivery address on checkout, and the
- * branch editor. They are the same field definitions, so they must look and behave the same.
+ * location editor. They are the same field definitions, so they must look and behave the same.
  *
  * [errors] maps a field name to the store's own reason for refusing it, taken from `data.params`.
  */

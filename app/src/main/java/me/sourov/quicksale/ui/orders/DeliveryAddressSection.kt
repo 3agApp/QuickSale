@@ -37,22 +37,22 @@ import me.sourov.quicksale.ui.theme.Spacing
 /**
  * Where this order is going.
  *
- * One address, not a choice between kinds of address. Picking a branch fills the form — the
- * member's default branch is already filled in when the screen opens — and every field stays
+ * One address, not a choice between kinds of address. Picking a location fills the form — the
+ * member's default location is already filled in when the screen opens — and every field stays
  * editable, because the counter regularly needs "the usual place, but the loading bay round the
  * back" and that is a fact about *this order*, not a correction to the company's records. Edits
- * here are never written back to the branch; the company sheet is where branches are changed.
+ * here are never written back to the location; the company sheet is where locations are changed.
  *
  * The switch is the walk-out sale: no destination at all, which is what WooCommerce wants when an
  * order carries no shipping lines.
  */
 @Composable
 fun DeliveryAddressSection(
-    branches: List<OrgLocation>,
+    locations: List<OrgLocation>,
     delivery: DeliveryState,
     onDeliveryEnabledChange: (Boolean) -> Unit,
-    onSelectBranch: (Long) -> Unit,
-    onResetToBranch: () -> Unit,
+    onSelectLocation: (Long) -> Unit,
+    onResetToLocation: () -> Unit,
     addressForms: AddressForms,
     country: String,
     fields: List<AddressField>,
@@ -117,14 +117,14 @@ fun DeliveryAddressSection(
                     .padding(top = Spacing.md),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
-                if (branches.isNotEmpty()) {
+                if (locations.isNotEmpty()) {
                     AddressChoiceField(
-                        label = "Branch",
-                        value = branches.firstOrNull { it.id == delivery.branchId }
-                            ?.let { branchLabel(it) }
-                            ?: "Pick a branch to fill this in",
-                        choices = branches.map { it.id.toString() to branchLabel(it) },
-                        onSelect = { id -> id.toLongOrNull()?.let(onSelectBranch) },
+                        label = "Location",
+                        value = locations.firstOrNull { it.id == delivery.locationId }
+                            ?.let { locationLabel(it) }
+                            ?: "Pick a location to fill this in",
+                        choices = locations.map { it.id.toString() to locationLabel(it) },
+                        onSelect = { id -> id.toLongOrNull()?.let(onSelectLocation) },
                     )
                 }
 
@@ -144,7 +144,7 @@ fun DeliveryAddressSection(
                 ) {
                     EditedNotice(
                         allowCustomShipping = allowCustomShipping,
-                        onReset = onResetToBranch,
+                        onReset = onResetToLocation,
                     )
                 }
             }
@@ -153,7 +153,7 @@ fun DeliveryAddressSection(
 }
 
 /**
- * Shown once the address no longer matches its branch, so it is never a surprise that the parcel
+ * Shown once the address no longer matches its location, so it is never a surprise that the parcel
  * is going somewhere the company's records don't mention.
  *
  * On an account that forbids custom shipping the store will refuse this address. The app says so
@@ -172,10 +172,10 @@ private fun EditedNotice(allowCustomShipping: Boolean, onReset: () -> Unit) {
         Column(modifier = Modifier.padding(start = Spacing.md, end = Spacing.md, top = Spacing.sm)) {
             Text(
                 text = if (allowCustomShipping) {
-                    "Delivering somewhere else this once. The saved branch is unchanged."
+                    "Delivering somewhere else this once. The saved location is unchanged."
                 } else {
-                    "This account only ships to its saved branches, so the store will refuse a " +
-                        "changed address. Reset it, or edit the branch from the company sheet."
+                    "This account only ships to its saved locations, so the store will refuse a " +
+                        "changed address. Reset it, or edit the location from the company sheet."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (allowCustomShipping) {
@@ -192,14 +192,14 @@ private fun EditedNotice(allowCustomShipping: Boolean, onReset: () -> Unit) {
                     modifier = Modifier.size(16.dp),
                 )
                 Spacer(Modifier.width(Spacing.sm))
-                Text("Reset to the branch")
+                Text("Reset to the saved address")
             }
         }
     }
 }
 
-/** A branch reads as its name, with the default marked so the preselected one explains itself. */
-private fun branchLabel(branch: OrgLocation): String {
-    val name = branch.name.ifBlank { branch.singleLine.ifBlank { "Saved branch" } }
-    return if (branch.isDefault) "$name · Default" else name
+/** A location reads as its name, with the default marked so the preselected one explains itself. */
+private fun locationLabel(location: OrgLocation): String {
+    val name = location.name.ifBlank { location.singleLine.ifBlank { "Saved location" } }
+    return if (location.isDefault) "$name · Default" else name
 }

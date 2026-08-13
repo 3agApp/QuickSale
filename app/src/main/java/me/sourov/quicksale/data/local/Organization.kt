@@ -170,9 +170,9 @@ data class OrgLocation(
      * This address under WooCommerce's own field names — the keys the address form renders and the
      * order's `shipping` block is submitted with.
      *
-     * A branch is a WooCommerce shipping address column for column, so filling a form from one is
+     * A location is a WooCommerce shipping address column for column, so filling a form from one is
      * a rename and nothing more. [name] and [isDefault] are deliberately absent: they label the
-     * branch, they are not part of the address.
+     * location, they are not part of the address.
      */
     fun toAddressFields(): Map<String, String> = mapOf(
         "first_name" to firstName,
@@ -188,9 +188,9 @@ data class OrgLocation(
     )
 
     /**
-     * True when [values] is still this branch's own address.
+     * True when [values] is still this location's own address.
      *
-     * This is what decides whether an order names the branch by ID or posts a typed address, so it
+     * This is what decides whether an order names the location by ID or posts a typed address, so it
      * has to answer the question the operator would: a field the current country's form doesn't
      * render is absent from [values] rather than blank, and absent-versus-blank is not a change.
      * Surrounding whitespace isn't a change either — the store trims it too.

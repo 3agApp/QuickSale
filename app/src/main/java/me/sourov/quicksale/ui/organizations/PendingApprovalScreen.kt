@@ -184,7 +184,7 @@ fun PendingApprovalScreen(
             if (locations.isNotEmpty()) {
                 Spacer(Modifier.height(Spacing.sectionSpacing))
                 SectionHeader(
-                    title = "Branches",
+                    title = "Locations",
                     subtitle = "Where their orders would be delivered",
                 )
                 Spacer(Modifier.height(Spacing.sectionGap))

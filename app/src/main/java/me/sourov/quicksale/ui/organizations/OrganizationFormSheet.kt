@@ -5,20 +5,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -29,47 +26,44 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import me.sourov.quicksale.appContainer
-import me.sourov.quicksale.data.local.OrgLocation
+import me.sourov.quicksale.data.local.Organization
 import me.sourov.quicksale.ui.components.AddressFormFields
 import me.sourov.quicksale.ui.components.SectionHeader
 import me.sourov.quicksale.ui.theme.Sizes
 import me.sourov.quicksale.ui.theme.Spacing
 
 /**
- * Adds or edits a saved location, writing straight to the store.
+ * Editing the company itself — its name, its billing address, and whether its orders may go
+ * anywhere other than a saved location.
  *
- * This is the address editor whose changes *stick*: the delivery form on the checkout only ever
- * describes the order in hand. The sheet says so out loud, because two address forms that look
- * alike and behave differently is exactly the sort of thing a counter learns the hard way.
+ * The billing address is the one the *store* stamps on every order for this account; it is not a
+ * delivery address and changing it never changes where anything is sent. That distinction is the
+ * whole reason this sheet and the location editor look alike but are kept apart.
  *
- * [onSaved] fires after the store has accepted the write, so the caller can resync and close.
+ * [onSaved] fires once the store has accepted the write.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LocationFormSheet(
-    organizationId: Long,
-    existing: OrgLocation?,
+fun OrganizationFormSheet(
+    organization: Organization,
     onDismiss: () -> Unit,
     onSaved: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = remember(context) { context.appContainer }
-    val viewModel: LocationFormViewModel = viewModel(
-        // The key keeps "add" and "edit location 3" from sharing one instance across openings.
-        key = "location-${organizationId}-${existing?.id ?: 0L}",
-        factory = LocationFormViewModel.factory(
-            organizationId = organizationId,
-            existing = existing,
+    val viewModel: OrganizationFormViewModel = viewModel(
+        key = "organization-${organization.id}",
+        factory = OrganizationFormViewModel.factory(
+            organization = organization,
             organizationRepository = container.organizations,
             addressFormRepository = container.addressForms,
             settingsRepository = container.settings,
@@ -77,7 +71,8 @@ fun LocationFormSheet(
     )
 
     val name by viewModel.name.collectAsStateWithLifecycle()
-    val isDefault by viewModel.isDefault.collectAsStateWithLifecycle()
+    val email by viewModel.email.collectAsStateWithLifecycle()
+    val allowCustomShipping by viewModel.allowCustomShipping.collectAsStateWithLifecycle()
     val addressForms by viewModel.addressForms.collectAsStateWithLifecycle()
     val country by viewModel.country.collectAsStateWithLifecycle()
     val fields by viewModel.fields.collectAsStateWithLifecycle()
@@ -85,11 +80,7 @@ fun LocationFormSheet(
     val fieldErrors by viewModel.fieldErrors.collectAsStateWithLifecycle()
     val saving by viewModel.saving.collectAsStateWithLifecycle()
     val saved by viewModel.saved.collectAsStateWithLifecycle()
-    val deleting by viewModel.deleting.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
-
-    var confirmingDelete by remember { mutableStateOf(false) }
-    val busy = saving || deleting
 
     LaunchedEffect(saved) {
         if (saved) {
@@ -104,53 +95,74 @@ fun LocationFormSheet(
     ) {
         Column(
             modifier = Modifier
-                // Save/Cancel are at the bottom of this scroll; the keyboard must push them, not
-                // cover them.
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.screen)
                 .padding(bottom = Spacing.xxl),
         ) {
             SectionHeader(
-                title = if (viewModel.isEditing) "Edit location" else "Add a location",
-                subtitle = "Saved on the account — every future order can be sent here",
+                title = "Edit company",
+                subtitle = "What the store bills, not where it delivers",
             )
 
             Spacer(Modifier.height(Spacing.lg))
             OutlinedTextField(
                 value = name,
                 onValueChange = viewModel::setName,
-                label = { Text("Location name *") },
-                supportingText = {
-                    Text(fieldErrors["name"] ?: "What the counter picks it by — \"Warehouse North\"")
-                },
+                label = { Text("Company name *") },
+                supportingText = fieldErrors["name"]?.let { { Text(it) } },
                 isError = fieldErrors["name"] != null,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
 
             Spacer(Modifier.height(Spacing.sm))
+            OutlinedTextField(
+                value = email,
+                onValueChange = viewModel::setEmail,
+                label = { Text("Billing email") },
+                supportingText = {
+                    Text(fieldErrors["email"] ?: "Where the store sends this account's invoices")
+                },
+                isError = fieldErrors["email"] != null,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(Spacing.md))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = "Default location",
+                        text = "Allow typed delivery addresses",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        // Setting it on one clears it on the others, server-side.
-                        text = "New orders start here. Only one location can be the default.",
+                        text = if (allowCustomShipping) {
+                            "An order may go to an address typed at the counter."
+                        } else {
+                            "Every order must go to one of this account's saved locations."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(checked = isDefault, onCheckedChange = viewModel::setDefault)
+                Switch(
+                    checked = allowCustomShipping,
+                    onCheckedChange = viewModel::setAllowCustomShipping,
+                )
             }
 
             Spacer(Modifier.height(Spacing.lg))
+            SectionHeader(
+                title = "Billing address",
+                subtitle = "Applied by the store to every order on this account",
+            )
+            Spacer(Modifier.height(Spacing.sectionGap))
             AddressFormFields(
                 addressForms = addressForms,
                 country = country,
@@ -159,15 +171,6 @@ fun LocationFormSheet(
                 onSelectCountry = viewModel::selectCountry,
                 onFieldChange = viewModel::setField,
                 errors = fieldErrors,
-            )
-
-            Spacer(Modifier.height(Spacing.sm))
-            Text(
-                // Both are true of the route and neither is obvious from a checkout's own rules.
-                text = "A surname and a phone aren't required. Leave the company blank and the " +
-                    "store fills in the account's own name.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             Spacer(Modifier.height(Spacing.lg))
@@ -193,55 +196,11 @@ fun LocationFormSheet(
                             color = MaterialTheme.colorScheme.onPrimary,
                         )
                     } else {
-                        Text(if (viewModel.isEditing) "Save location" else "Add location")
+                        Text("Save company")
                     }
                 }
             }
-
-            if (viewModel.isEditing) {
-                Spacer(Modifier.height(Spacing.sm))
-                TextButton(
-                    onClick = { confirmingDelete = true },
-                    enabled = !busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.DeleteOutline,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(Spacing.sm))
-                    Text("Delete this location", color = MaterialTheme.colorScheme.error)
-                }
-            }
         }
-    }
-
-    if (confirmingDelete && existing != null) {
-        AlertDialog(
-            onDismissRequest = { confirmingDelete = false },
-            title = { Text("Delete ${existing.name}?") },
-            text = {
-                Text(
-                    "Orders already sent there keep the address they were placed with. Everyone " +
-                        "on this account loses it as a delivery choice.",
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmingDelete = false
-                        viewModel.delete()
-                    },
-                ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingDelete = false }) { Text("Keep it") }
-            },
-        )
     }
 
     error?.let { text ->

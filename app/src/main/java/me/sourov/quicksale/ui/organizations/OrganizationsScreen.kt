@@ -273,12 +273,12 @@ private fun OrganizationRow(
     }
 }
 
-/** "3 members · 2 branches", the two facts that used to be a row of iconed tallies. */
+/** "3 members · 2 locations", the two facts that used to be a row of iconed tallies. */
 private fun tallySummary(tally: OrganizationTally?): String {
     fun count(value: Int, singular: String, plural: String) =
         "$value ${if (value == 1) singular else plural}"
     return listOf(
         count(tally?.memberCount ?: 0, "member", "members"),
-        count(tally?.locationCount ?: 0, "branch", "branches"),
+        count(tally?.locationCount ?: 0, "location", "locations"),
     ).joinToString(" · ")
 }

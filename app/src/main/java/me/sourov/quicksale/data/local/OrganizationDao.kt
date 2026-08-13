@@ -134,7 +134,7 @@ interface OrganizationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLocations(items: List<OrgLocation>)
 
-    /** Clears the default flag on every branch of an organization except [keepId]. */
+    /** Clears the default flag on every location of an organization except [keepId]. */
     @Query(
         """
         UPDATE org_locations SET isDefault = 0
@@ -144,9 +144,9 @@ interface OrganizationDao {
     suspend fun clearOtherDefaults(organizationId: Long, keepId: Long)
 
     /**
-     * Writes one branch back after the store accepted it, keeping the single-default rule.
+     * Writes one location back after the store accepted it, keeping the single-default rule.
      *
-     * Setting a branch as default clears the flag on the others *server-side*, so applying only
+     * Setting a location as default clears the flag on the others *server-side*, so applying only
      * the row that came back would leave two locally — and the till would offer a default that no
      * longer is one until the next full sync happened to correct it.
      */
@@ -155,6 +155,17 @@ interface OrganizationDao {
         insertLocations(listOf(location))
         if (location.isDefault) clearOtherDefaults(location.organizationId, location.id)
     }
+
+    /*
+     * Single-row removals, for the rows the app itself deletes. The store has already accepted the
+     * delete by the time these run, so the screen updates without waiting for the next snapshot.
+     */
+
+    @Query("DELETE FROM org_members WHERE memberId = :memberId")
+    suspend fun deleteMember(memberId: Long)
+
+    @Query("DELETE FROM org_locations WHERE id = :locationId")
+    suspend fun deleteLocation(locationId: Long)
 
     @Query("DELETE FROM organizations")
     suspend fun clearOrganizations()

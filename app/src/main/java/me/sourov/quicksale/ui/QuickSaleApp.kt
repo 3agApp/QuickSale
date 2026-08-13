@@ -251,7 +251,7 @@ private fun QuickSaleShell(mode: DeviceMode) {
                                     IconButton(onClick = { showingCompany = true }) {
                                         Icon(
                                             imageVector = Icons.Outlined.Storefront,
-                                            contentDescription = "Company details and branches",
+                                            contentDescription = "Company details and locations",
                                         )
                                     }
                                 }
@@ -413,9 +413,9 @@ private fun barDetail(
 /**
  * A title for the screens that are pushed on top of a tab and don't bring their own bar.
  *
- * A settings page can name itself from the route alone. A product or an account can't — the shell
- * doesn't know which one — but both put the name at the top of their own content, so the bar only
- * has to say what kind of thing you are looking at.
+ * A settings page can name itself from the route alone. A product can't — the shell doesn't know
+ * which one — but it puts the name at the top of its own content, so the bar only has to say what
+ * kind of thing you are looking at. (An account brings its own bar, carrying the company name.)
  */
 private fun stackedScreenTitle(route: String?): String = when {
     route == null -> ""
@@ -423,7 +423,6 @@ private fun stackedScreenTitle(route: String?): String = when {
     route.startsWith(Routes.SETTINGS_SECTION) ->
         SettingsSection.fromName(route.substringAfter('/'))?.title ?: "Settings"
     route.startsWith(Routes.PRODUCT_DETAIL) -> "Product"
-    route.startsWith(Routes.ORGANIZATION_DETAIL) -> "Account"
     else -> ""
 }
 

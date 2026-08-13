@@ -48,6 +48,7 @@ fun MemberRow(
     organizationCanTrade: Boolean,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
 ) {
     val canOrder = member.canPlaceOrders && organizationCanTrade
     QuickSaleCard(
@@ -116,13 +117,16 @@ fun MemberRow(
                     member.allowedLocationIds?.let { allowed ->
                         Spacer(Modifier.height(Spacing.xs))
                         Text(
-                            text = "Can deliver to ${allowed.size} of the saved branches",
+                            text = "Can deliver to ${allowed.size} of the saved locations",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
             }
+            // The chevron says the row starts an order; the pencil is the way to change the
+            // person instead. Two glyphs because they are two different intentions, and a row that
+            // did both from one tap is how you bill the wrong company.
             if (canOrder && onClick != null) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -131,15 +135,25 @@ fun MemberRow(
                     modifier = Modifier.size(Sizes.iconLarge),
                 )
             }
+            onEdit?.let {
+                IconButton(onClick = it) {
+                    Icon(
+                        imageVector = Icons.Outlined.Edit,
+                        contentDescription = "Edit ${member.name.ifBlank { member.email }}",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(Sizes.icon),
+                    )
+                }
+            }
         }
     }
 }
 
 /**
- * One saved branch. The address is shown exactly as WooCommerce formats it for its country —
+ * One saved location. The address is shown exactly as WooCommerce formats it for its country —
  * postcode before the city in Germany, after it in the US — rather than assembled here.
  *
- * [onEdit] is supplied only where branches are actually editable (the company sheet); elsewhere the
+ * [onEdit] is supplied only where locations are actually editable (the company sheet); elsewhere the
  * row is a read-only record of where deliveries go.
  */
 @Composable

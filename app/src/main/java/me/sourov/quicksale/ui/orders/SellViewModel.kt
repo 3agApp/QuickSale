@@ -59,17 +59,17 @@ data class CartLine(val product: Product, val quantity: Int) {
 /**
  * Where this order is going.
  *
- * There is one address form, not a choice between a saved branch and a typed address. Picking a
- * branch *fills* the form; the operator may then correct a house number without that correction
- * being written back to the branch. What the request carries follows from whether anything was
+ * There is one address form, not a choice between a saved location and a typed address. Picking a
+ * location *fills* the form; the operator may then correct a house number without that correction
+ * being written back to the location. What the request carries follows from whether anything was
  * corrected — see [SellViewModel.destination].
  */
 data class DeliveryState(
     /** False for a walk-out sale: no location, no shipping lines, stamped with location `0`. */
     val enabled: Boolean = true,
-    /** The branch the form was filled from, or null when nothing has been picked. */
-    val branchId: Long? = null,
-    /** True once the form no longer matches [branchId]'s saved address. */
+    /** The location the form was filled from, or null when nothing has been picked. */
+    val locationId: Long? = null,
+    /** True once the form no longer matches [locationId]'s saved address. */
     val edited: Boolean = false,
 )
 
@@ -153,7 +153,7 @@ class SellViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /** Only the branches this member is allowed to choose, default first. */
+    /** Only the locations this member is allowed to choose, default first. */
     @OptIn(ExperimentalCoroutinesApi::class)
     val locations: StateFlow<List<OrgLocation>> = member
         .flatMapLatest { current ->
@@ -162,7 +162,7 @@ class SellViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
-     * Every branch the organization has, ignoring the member's access list.
+     * Every location the organization has, ignoring the member's access list.
      *
      * `location_access` limits what a member may *choose*, not what the company owns — so the
      * company sheet, which is a view of the account rather than of this order, shows all of them.
@@ -189,7 +189,7 @@ class SellViewModel(
 
     private val _deliveryEnabled = MutableStateFlow(true)
 
-    private val _branchId = MutableStateFlow<Long?>(null)
+    private val _locationId = MutableStateFlow<Long?>(null)
 
     private val _addressCountry = MutableStateFlow("")
     val addressCountry: StateFlow<String> = _addressCountry.asStateFlow()
@@ -197,15 +197,15 @@ class SellViewModel(
     private val _addressValues = MutableStateFlow<Map<String, String>>(emptyMap())
     val addressValues: StateFlow<Map<String, String>> = _addressValues.asStateFlow()
 
-    /** Whether the delivery form still matches the branch it was filled from. */
+    /** Whether the delivery form still matches the location it was filled from. */
     private val addressEdited: StateFlow<Boolean> =
-        combine(_branchId, _addressValues, locations) { branchId, values, available ->
-            val branch = available.firstOrNull { it.id == branchId } ?: return@combine false
-            !branch.matchesAddress(values)
+        combine(_locationId, _addressValues, locations) { locationId, values, available ->
+            val location = available.firstOrNull { it.id == locationId } ?: return@combine false
+            !location.matchesAddress(values)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val delivery: StateFlow<DeliveryState> =
-        combine(_deliveryEnabled, _branchId, addressEdited, ::DeliveryState)
+        combine(_deliveryEnabled, _locationId, addressEdited, ::DeliveryState)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DeliveryState())
 
     /** The operator's explicit gateway pick; null falls back to the store's first gateway. */
@@ -328,19 +328,19 @@ class SellViewModel(
             persistOnChange()
         }
 
-        // Fill the delivery form from the member's default branch, so the common case needs no
+        // Fill the delivery form from the member's default location, so the common case needs no
         // taps at all: the address is already the one this order was always going to.
         //
         // Collected rather than awaited once, because the customer can now change mid-cart — when
-        // it does, the branch held here belongs to the previous account and has to be replaced.
+        // it does, the location held here belongs to the previous account and has to be replaced.
         viewModelScope.launch {
             locations.collect { available ->
-                if (available.isNotEmpty() && available.none { it.id == _branchId.value }) {
-                    selectBranch((available.firstOrNull { it.isDefault } ?: available.first()).id)
+                if (available.isNotEmpty() && available.none { it.id == _locationId.value }) {
+                    selectLocation((available.firstOrNull { it.isDefault } ?: available.first()).id)
                 }
             }
         }
-        // An account with no branches still needs a form; start it on the shop's own base country.
+        // An account with no locations still needs a form; start it on the shop's own base country.
         viewModelScope.launch {
             val forms = addressForms.first { !it.isEmpty }
             if (_addressCountry.value.isBlank()) selectAddressCountry(forms.defaultCountry)
@@ -350,14 +350,14 @@ class SellViewModel(
     /**
      * Attaches this cart to a member of an organization, or detaches it when [customer] is null.
      *
-     * The delivery form is cleared rather than carried over: the previous account's branch is not a
+     * The delivery form is cleared rather than carried over: the previous account's location is not a
      * plausible default for this one, and a stale address silently attached to the wrong company is
      * exactly the mistake that survives all the way to a delivery van.
      */
     fun selectCustomer(customer: Customer?) {
         if (_customer.value == customer) return
         _customer.value = customer
-        _branchId.value = null
+        _locationId.value = null
         _addressValues.value = emptyMap()
         _addressCountry.value = addressForms.value.defaultCountry
     }
@@ -376,21 +376,21 @@ class SellViewModel(
     fun setDeliveryEnabled(enabled: Boolean) { _deliveryEnabled.value = enabled }
 
     /**
-     * Fills the delivery form from a saved branch.
+     * Fills the delivery form from a saved location.
      *
-     * The branch is copied into the form, not referenced by it — which is what lets the operator
+     * The location is copied into the form, not referenced by it — which is what lets the operator
      * correct a house number for one order without that correction reaching the company's records.
      */
-    fun selectBranch(branchId: Long) {
-        val branch = locations.value.firstOrNull { it.id == branchId } ?: return
-        _branchId.value = branchId
-        val fields = branch.toAddressFields()
+    fun selectLocation(locationId: Long) {
+        val location = locations.value.firstOrNull { it.id == locationId } ?: return
+        _locationId.value = locationId
+        val fields = location.toAddressFields()
         _addressCountry.value = fields["country"].orEmpty()
         _addressValues.value = fields
     }
 
-    /** Puts the branch's own address back, discarding this order's edits. */
-    fun resetAddressToBranch() { _branchId.value?.let(::selectBranch) }
+    /** Puts the location's own address back, discarding this order's edits. */
+    fun resetAddressToLocation() { _locationId.value?.let(::selectLocation) }
 
     fun selectAddressCountry(code: String) {
         _addressCountry.value = code
@@ -598,17 +598,17 @@ class SellViewModel(
     /**
      * Translates the delivery form into what the order request carries.
      *
-     * An untouched form is posted as its branch's ID: the store resolves that against the member's
-     * access list and stamps the branch's name on the order, which is both cheaper and more
+     * An untouched form is posted as its location's ID: the store resolves that against the member's
+     * access list and stamps the location's name on the order, which is both cheaper and more
      * truthful than re-posting an address the store already holds. Only an *edited* form becomes a
      * typed address — and it is sent even for an account that forbids custom shipping, so the
      * refusal the operator sees is the store's own reason rather than a guess made here.
      */
     private fun destination(): WooCommerceApi.Destination {
         if (!_deliveryEnabled.value) return WooCommerceApi.Destination.None
-        val branchId = _branchId.value
-        if (branchId != null && !addressEdited.value) {
-            return WooCommerceApi.Destination.Location(branchId)
+        val locationId = _locationId.value
+        if (locationId != null && !addressEdited.value) {
+            return WooCommerceApi.Destination.Location(locationId)
         }
         return WooCommerceApi.Destination.OneOff(
             // Only the fields this country's form actually defines, so nothing stray is posted.
@@ -621,11 +621,11 @@ class SellViewModel(
     private fun currentCountry(): String =
         _addressCountry.value.ifBlank { addressForms.value.defaultCountry }
 
-    /** The branch name to show on the confirmation when the store doesn't stamp one itself. */
+    /** The location name to show on the confirmation when the store doesn't stamp one itself. */
     private fun chosenLocationName(): String {
         if (!_deliveryEnabled.value || addressEdited.value) return ""
-        val branchId = _branchId.value ?: return ""
-        return locations.value.firstOrNull { it.id == branchId }?.name.orEmpty()
+        val locationId = _locationId.value ?: return ""
+        return locations.value.firstOrNull { it.id == locationId }?.name.orEmpty()
     }
 
     private fun placeBlocker(

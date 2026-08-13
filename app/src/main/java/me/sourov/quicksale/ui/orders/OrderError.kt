@@ -12,7 +12,7 @@ import java.io.IOException
  * says what to do about it.
  *
  * Branching happens on the error `code`, never the message: messages are localised and follow the
- * shop's organization vocabulary, so the same refusal reads "Branch" on one shop and "Campus" on
+ * shop's organization vocabulary, so the same refusal reads "Location" on one shop and "Campus" on
  * another.
  */
 data class OrderError(

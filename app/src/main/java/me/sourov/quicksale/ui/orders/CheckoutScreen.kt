@@ -86,7 +86,7 @@ fun CheckoutScreen(
     val selectedShipping by viewModel.selectedShipping.collectAsStateWithLifecycle()
     val shippingCost by viewModel.shippingCost.collectAsStateWithLifecycle()
     val couponCode by viewModel.couponCode.collectAsStateWithLifecycle()
-    val branches by viewModel.locations.collectAsStateWithLifecycle()
+    val locations by viewModel.locations.collectAsStateWithLifecycle()
     val delivery by viewModel.delivery.collectAsStateWithLifecycle()
     val addressForms by viewModel.addressForms.collectAsStateWithLifecycle()
     val addressCountry by viewModel.addressCountry.collectAsStateWithLifecycle()
@@ -149,7 +149,7 @@ fun CheckoutScreen(
                     IconButton(onClick = { showingCompany = true }) {
                         Icon(
                             imageVector = Icons.Outlined.Storefront,
-                            contentDescription = "Company details and branches",
+                            contentDescription = "Company details and locations",
                         )
                     }
                 },
@@ -234,11 +234,11 @@ fun CheckoutScreen(
             )
             Spacer(Modifier.height(Spacing.sectionGap))
             DeliveryAddressSection(
-                branches = branches,
+                locations = locations,
                 delivery = delivery,
                 onDeliveryEnabledChange = viewModel::setDeliveryEnabled,
-                onSelectBranch = viewModel::selectBranch,
-                onResetToBranch = viewModel::resetAddressToBranch,
+                onSelectLocation = viewModel::selectLocation,
+                onResetToLocation = viewModel::resetAddressToLocation,
                 addressForms = addressForms,
                 country = addressCountry,
                 fields = addressFields,

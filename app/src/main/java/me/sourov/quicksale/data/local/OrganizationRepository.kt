@@ -64,7 +64,7 @@ class OrganizationRepository(private val dao: OrganizationDao) {
      *
      * Everything below applies a record the store has *already accepted*, so the screen shows the
      * change immediately instead of waiting for the next snapshot. That wait was the visible bug:
-     * add a branch and it wasn't in the branch picker; approve an account and it stayed pending
+     * add a location and it wasn't in the location picker; approve an account and it stayed pending
      * until a sync that might be half an hour away, on a stand where the customer is still
      * standing there. The next full sync remains authoritative and simply agrees.
      */
@@ -74,8 +74,12 @@ class OrganizationRepository(private val dao: OrganizationDao) {
 
     suspend fun saveMember(member: Member) = dao.insertMembers(listOf(member))
 
-    /** Applies a branch, and the single-default rule that comes with it. */
+    /** Applies a location, and the single-default rule that comes with it. */
     suspend fun saveLocation(location: OrgLocation) = dao.saveLocation(location)
+
+    suspend fun deleteMember(memberId: Long) = dao.deleteMember(memberId)
+
+    suspend fun deleteLocation(locationId: Long) = dao.deleteLocation(locationId)
 
     private companion object {
         /** Enough to scroll a sheet, few enough that the answer is one glance, not a hunt. */

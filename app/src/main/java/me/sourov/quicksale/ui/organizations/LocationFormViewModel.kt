@@ -22,15 +22,15 @@ import me.sourov.quicksale.data.settings.AddressForms
 import me.sourov.quicksale.data.settings.SettingsRepository
 
 /**
- * Adding or editing one of a company's saved branches.
+ * Adding or editing one of a company's saved locations.
  *
  * This is the *persistent* address editor — the counterpart to the delivery form on checkout, which
- * only ever affects the order in hand. A branch saved here is what every future order starts from,
+ * only ever affects the order in hand. A location saved here is what every future order starts from,
  * and what the shop's own checkout offers the customer on the website.
  */
-class BranchFormViewModel(
+class LocationFormViewModel(
     private val organizationId: Long,
-    /** Null when adding; the branch being edited otherwise. */
+    /** Null when adding; the location being edited otherwise. */
     private val existing: OrgLocation?,
     private val organizationRepository: OrganizationRepository,
     addressFormRepository: AddressFormRepository,
@@ -42,8 +42,8 @@ class BranchFormViewModel(
     val addressForms: StateFlow<AddressForms> = addressFormRepository.forms
         .stateIn(viewModelScope, SharingStarted.Eagerly, AddressForms())
 
-    /** Whether this company has any branch at all — the first one is default whether asked or not. */
-    private val branchCount = organizationRepository.locations(organizationId)
+    /** Whether this company has any location at all — the first one is default whether asked or not. */
+    private val existingLocations = organizationRepository.locations(organizationId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _name = MutableStateFlow(existing?.name.orEmpty())
@@ -77,7 +77,7 @@ class BranchFormViewModel(
     val saved: StateFlow<Boolean> = _saved.asStateFlow()
 
     init {
-        // A new branch starts on the shop's own base country, the same preselection the checkout
+        // A new location starts on the shop's own base country, the same preselection the checkout
         // form uses, so the right fields are on screen before anything is typed.
         if (existing == null) {
             viewModelScope.launch {
@@ -114,9 +114,9 @@ class BranchFormViewModel(
 
     fun save() {
         if (_saving.value) return
-        val branchName = _name.value.trim()
-        if (branchName.isBlank()) {
-            _fieldErrors.value = _fieldErrors.value + ("name" to "A branch needs a name")
+        val locationName = _name.value.trim()
+        if (locationName.isBlank()) {
+            _fieldErrors.value = _fieldErrors.value + ("name" to "A location needs a name")
             return
         }
         _saving.value = true
@@ -128,22 +128,23 @@ class BranchFormViewModel(
                     return@launch
                 }
                 val api = WoapApi(settings)
-                // Only the fields this country's form defines, so nothing stray is posted under a
-                // name this country's form never had.
-                val payload = fields.value.associate { field ->
-                    field.name to _values.value[field.name].orEmpty()
-                } + ("country" to _country.value.ifBlank { addressForms.value.defaultCountry })
-                // The first branch is the one every order starts from whether or not the box was
-                // ticked; an account whose only branch isn't default has no sensible default.
-                val default = _isDefault.value || branchCount.value.isEmpty()
+                // What the store already held, with the edited fields over the top. Posting only
+                // the *visible* fields blanks whatever this shop marks hidden — `company` on most
+                // shipping forms — and a country change still prunes what it should, because
+                // [selectCountry] filters _values.
+                val payload = _values.value +
+                    ("country" to _country.value.ifBlank { addressForms.value.defaultCountry })
+                // The first location is the one every order starts from whether or not the box was
+                // ticked; an account whose only location isn't default has no sensible default.
+                val default = _isDefault.value || existingLocations.value.isEmpty()
 
                 val saved = if (existing == null) {
-                    api.createLocation(organizationId, branchName, default, payload)
+                    api.createLocation(organizationId, locationName, default, payload)
                 } else {
-                    api.updateLocation(organizationId, existing.id, branchName, default, payload)
+                    api.updateLocation(organizationId, existing.id, locationName, default, payload)
                 }
                 // Applied locally straight away, from the row the store returned rather than from
-                // what was typed: a new branch has to be in the picker for the order being built
+                // what was typed: a new location has to be in the picker for the order being built
                 // right now, not after the next snapshot comes down.
                 organizationRepository.saveLocation(saved)
                 _saved.value = true
@@ -160,6 +161,54 @@ class BranchFormViewModel(
         }
     }
 
+    private val _deleting = MutableStateFlow(false)
+    val deleting: StateFlow<Boolean> = _deleting.asStateFlow()
+
+    /**
+     * Set once a delete has gone through and the store reported the company can no longer ship
+     * anywhere — worth repeating, because the store allows removing the last location and an
+     * account with none can only be sold to over the counter.
+     */
+    private val _shippingLost = MutableStateFlow(false)
+    val shippingLost: StateFlow<Boolean> = _shippingLost.asStateFlow()
+
+    /** Removes this location from the company, and with it every member's access to it. */
+    fun delete() {
+        val location = existing ?: return
+        if (_deleting.value) return
+        _deleting.value = true
+        viewModelScope.launch {
+            try {
+                val settings = settingsRepository.settings.first()
+                if (!settings.isConfigured) {
+                    _error.value = "Connect your store in Settings first"
+                    return@launch
+                }
+                val removal = WoapApi(settings).deleteLocation(organizationId, location.id)
+                organizationRepository.deleteLocation(location.id)
+                _shippingLost.value = !removal.organizationCanShip
+                // The caller closes on [saved]; a delete is as finished as a save.
+                _saved.value = true
+            } catch (e: WooApiException) {
+                _error.value = e.message
+            } catch (e: Exception) {
+                _error.value = e.message ?: "The store couldn't be reached"
+            } finally {
+                _deleting.value = false
+            }
+        }
+    }
+
+
+    /**
+     * Clears the finished flag once the caller has acted on it.
+     *
+     * This view model is keyed and so outlives the sheet that shows it. Left set, the flag fired
+     * again the instant the sheet was reopened and closed it before it had drawn — the row's edit
+     * button simply stopped working after the first save.
+     */
+    fun consumeSaved() { _saved.value = false }
+
     fun consumeError() { _error.value = null }
 
     companion object {
@@ -171,7 +220,7 @@ class BranchFormViewModel(
             settingsRepository: SettingsRepository,
         ) = viewModelFactory {
             initializer {
-                BranchFormViewModel(
+                LocationFormViewModel(
                     organizationId = organizationId,
                     existing = existing,
                     organizationRepository = organizationRepository,

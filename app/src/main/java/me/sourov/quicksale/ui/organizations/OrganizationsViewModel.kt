@@ -17,6 +17,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import me.sourov.quicksale.data.remote.WoapApi
+import me.sourov.quicksale.data.remote.WooApiException
+import me.sourov.quicksale.data.settings.SettingsRepository
 import me.sourov.quicksale.data.local.Organization
 import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.OrganizationStatus
@@ -71,8 +76,9 @@ class OrganizationsViewModel(private val repository: OrganizationRepository) : V
 }
 
 class OrganizationDetailViewModel(
-    organizationId: Long,
-    repository: OrganizationRepository,
+    private val organizationId: Long,
+    private val repository: OrganizationRepository,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     val organization = repository.organization(organizationId)
@@ -84,9 +90,63 @@ class OrganizationDetailViewModel(
     val locations = repository.locations(organizationId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    private val _working = MutableStateFlow(false)
+    val working: StateFlow<Boolean> = _working.asStateFlow()
+
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message.asStateFlow()
+
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    /**
+     * Moves the account between pending, active, suspended and rejected.
+     *
+     * Its own route, and its own confirmation in the UI, because this is what sends the shop's
+     * approval and rejection mail — a status is not a field you nudge while editing an address.
+     * The store answering "already that status" is reported as success, not as an error: two
+     * people working the same account must not produce two emails.
+     */
+    fun setStatus(status: OrganizationStatus) {
+        if (_working.value) return
+        _working.value = true
+        viewModelScope.launch {
+            try {
+                val settings = settingsRepository.settings.first()
+                if (!settings.isConfigured) {
+                    _error.value = "Connect your store in Settings first"
+                    return@launch
+                }
+                val change = WoapApi(settings).setOrganizationStatus(organizationId, status.slug)
+                change.organization?.let { repository.saveOrganization(it) }
+                _message.value = if (change.changed) {
+                    "Account is now ${status.label.lowercase()}"
+                } else {
+                    "Account was already ${status.label.lowercase()}"
+                }
+            } catch (e: WooApiException) {
+                _error.value = e.message
+            } catch (e: Exception) {
+                _error.value = e.message ?: "The store couldn't be reached"
+            } finally {
+                _working.value = false
+            }
+        }
+    }
+
+    fun consumeMessage() { _message.value = null }
+
+    fun consumeError() { _error.value = null }
+
     companion object {
-        fun factory(organizationId: Long, repository: OrganizationRepository) = viewModelFactory {
-            initializer { OrganizationDetailViewModel(organizationId, repository) }
+        fun factory(
+            organizationId: Long,
+            repository: OrganizationRepository,
+            settingsRepository: SettingsRepository,
+        ) = viewModelFactory {
+            initializer {
+                OrganizationDetailViewModel(organizationId, repository, settingsRepository)
+            }
         }
     }
 }

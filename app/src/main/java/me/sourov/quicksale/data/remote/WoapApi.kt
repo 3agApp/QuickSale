@@ -164,6 +164,100 @@ class WoapApi(settings: StoreSettings) {
     }
 
     /**
+     * Edits an organization's own details.
+     *
+     * `status` is deliberately not a parameter — the route refuses it, because a status change is
+     * what sends the shop's approval mail and has [setOrganizationStatus] to itself. `tax_id` is
+     * absent for a different reason: the snapshot doesn't carry it, so the app has no current value
+     * to show and would be offering a field that silently blanks whatever is already there.
+     */
+    suspend fun updateOrganization(
+        organizationId: Long,
+        name: String,
+        allowCustomShipping: Boolean,
+        billing: Map<String, String>,
+    ): Organization {
+        val body = JSONObject().apply {
+            put("name", name)
+            put("allow_custom_shipping", allowCustomShipping)
+            put("billing", JSONObject().apply { billing.forEach { (k, v) -> put(k, v) } })
+        }
+        val response = http.patch("wc-woap/v1/organizations/$organizationId", body)
+        return JSONObject(response.body).toOrganization()
+    }
+
+    /**
+     * Edits one membership: what they may do, whether they are switched on, and where they may
+     * send an order.
+     *
+     * Every field is optional and only what is supplied is sent, because this route merges. In
+     * particular `capabilities` is never sent: permissions are stored as a diff against the role,
+     * so echoing back a map read under the old role would pin the member to permissions their new
+     * role has moved away from.
+     *
+     * [locationAccess] is null for "leave alone", [Member.LOCATION_ACCESS_ALL] for unrestricted, or
+     * the IDs they are limited to.
+     */
+    suspend fun updateMember(
+        organizationId: Long,
+        memberId: Long,
+        role: String? = null,
+        status: String? = null,
+        locationAccess: Set<Long>? = null,
+        unrestrictedLocations: Boolean = false,
+    ): Member {
+        val body = JSONObject().apply {
+            role?.let { put("role", it) }
+            status?.let { put("status", it) }
+            when {
+                unrestrictedLocations -> put("location_access", Member.LOCATION_ACCESS_ALL)
+                locationAccess != null -> put(
+                    "location_access",
+                    JSONArray().apply { locationAccess.forEach { put(it) } },
+                )
+            }
+        }
+        val response = http.patch(
+            path = "wc-woap/v1/organizations/$organizationId/members/$memberId",
+            body = body,
+        )
+        return JSONObject(response.body).toMember(organizationId)
+    }
+
+    /**
+     * Takes somebody off an organization. Their login survives — the store demotes them to an
+     * ordinary customer rather than deleting the person.
+     *
+     * The store refuses to remove the last active admin (`409 woap_rest_last_admin`), which arrives
+     * here as a [WooException] carrying that message; an account nobody can administer is not a
+     * state the app should be able to create.
+     */
+    suspend fun deleteMember(organizationId: Long, memberId: Long) {
+        http.delete("wc-woap/v1/organizations/$organizationId/members/$memberId")
+    }
+
+    /**
+     * The answer to deleting a location. [organizationCanShip] is the store's own verdict on
+     * whether anywhere is left to deliver to — worth repeating to whoever just deleted it, since
+     * the store allows removing the last one and an account with no locations can only sell over
+     * the counter.
+     */
+    class LocationRemoval(val organizationCanShip: Boolean)
+
+    /** Removes a saved location, and with it every member's access to it. */
+    suspend fun deleteLocation(organizationId: Long, locationId: Long): LocationRemoval {
+        val response = http.delete(
+            "wc-woap/v1/organizations/$organizationId/locations/$locationId",
+        )
+        val json = runCatching { JSONObject(response.body) }.getOrNull()
+        return LocationRemoval(
+            // Absent means the store didn't say; assume it can still ship rather than raising a
+            // warning nobody can act on.
+            organizationCanShip = json?.optBoolean("organization_can_ship", true) ?: true,
+        )
+    }
+
+    /**
      * The answer to a status write. [changed] is false when the organization already held that
      * status — a success, not an error: two people working the same queue, or one double-tap, must
      * not produce two approval emails.
@@ -205,7 +299,7 @@ class WoapApi(settings: StoreSettings) {
     }
 
     /**
-     * Adds a branch. [fields] carries WooCommerce's own shipping field names at the top level of
+     * Adds a location. [fields] carries WooCommerce's own shipping field names at the top level of
      * the body, matching how the snapshot reports them.
      *
      * `name` is required; a surname and a phone are not, even where the shop's checkout requires a
@@ -225,7 +319,7 @@ class WoapApi(settings: StoreSettings) {
         return JSONObject(response.body).toLocation(organizationId)
     }
 
-    /** Edits a branch. The edit is partial, but the merged address is validated whole. */
+    /** Edits a location. The edit is partial, but the merged address is validated whole. */
     suspend fun updateLocation(
         organizationId: Long,
         locationId: Long,
