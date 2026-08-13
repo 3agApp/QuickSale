@@ -35,7 +35,7 @@ import me.sourov.quicksale.data.settings.AddressFormRepository
 import me.sourov.quicksale.data.settings.AddressForms
 import me.sourov.quicksale.data.settings.CheckoutConfig
 import me.sourov.quicksale.data.settings.CheckoutConfigRepository
-import me.sourov.quicksale.data.settings.OrderSettingsRepository
+import me.sourov.quicksale.data.settings.OrderOutcome
 import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.SettingsRepository
 import me.sourov.quicksale.data.settings.ShippingOption
@@ -127,7 +127,6 @@ class SellViewModel(
     private val productRepository: ProductRepository,
     private val cartRepository: CartRepository,
     private val settingsRepository: SettingsRepository,
-    private val orderSettingsRepository: OrderSettingsRepository,
     checkoutConfigRepository: CheckoutConfigRepository,
     addressFormRepository: AddressFormRepository,
 ) : ViewModel() {
@@ -214,6 +213,14 @@ class SellViewModel(
         combine(_gatewayChoice, checkout) { choice, config ->
             choice ?: config.gateways.firstOrNull()
         }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /**
+     * What placing the order now would create. Follows the payment method rather than any setting
+     * of this app's, so the checkout can say what is about to happen before it happens.
+     */
+    val orderOutcome: StateFlow<OrderOutcome> = selectedGateway
+        .map { OrderOutcome.forGateway(it) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, OrderOutcome.PAID)
 
     private val _shippingChoice = MutableStateFlow<ShippingOption?>(null)
     val selectedShipping: StateFlow<ShippingOption?> = _shippingChoice.asStateFlow()
@@ -551,18 +558,18 @@ class SellViewModel(
                     _message.value = "Connect your store in Settings to place orders"
                     return@launch
                 }
-                val status = orderSettingsRepository.status.first()
                 val config = checkout.value
+                // The payment method decides what state the order is created in — see [OrderOutcome].
+                val gateway = selectedGateway.value
                 try {
                     val api = WooCommerceApi(settings)
                     val order = api.createOrder(
                         // The member's WordPress user id is what makes this the member's order.
                         customerId = member.userId,
                         lineItems = current.map { WooCommerceApi.LineItem(it.product.id, it.quantity) },
-                        status = status.slug,
-                        setPaid = status.setPaid,
+                        outcome = OrderOutcome.forGateway(gateway),
                         destination = destination(),
-                        paymentMethod = selectedGateway.value,
+                        paymentMethod = gateway,
                         shipping = shippingSelection(config),
                         couponCode = _couponCode.value,
                     )
@@ -749,7 +756,6 @@ class SellViewModel(
             productRepository: ProductRepository,
             cartRepository: CartRepository,
             settingsRepository: SettingsRepository,
-            orderSettingsRepository: OrderSettingsRepository,
             checkoutConfigRepository: CheckoutConfigRepository,
             addressFormRepository: AddressFormRepository,
         ) = viewModelFactory {
@@ -759,7 +765,6 @@ class SellViewModel(
                     productRepository = productRepository,
                     cartRepository = cartRepository,
                     settingsRepository = settingsRepository,
-                    orderSettingsRepository = orderSettingsRepository,
                     checkoutConfigRepository = checkoutConfigRepository,
                     addressFormRepository = addressFormRepository,
                 )

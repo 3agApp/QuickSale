@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.sourov.quicksale.data.local.Member
 import me.sourov.quicksale.data.local.Organization
+import me.sourov.quicksale.data.settings.OrderOutcome
 import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.ShippingOption
 import me.sourov.quicksale.ui.components.Monogram
@@ -83,6 +84,7 @@ fun CheckoutScreen(
     val blocker by viewModel.blocker.collectAsStateWithLifecycle()
     val checkout by viewModel.checkout.collectAsStateWithLifecycle()
     val selectedGateway by viewModel.selectedGateway.collectAsStateWithLifecycle()
+    val orderOutcome by viewModel.orderOutcome.collectAsStateWithLifecycle()
     val selectedShipping by viewModel.selectedShipping.collectAsStateWithLifecycle()
     val shippingCost by viewModel.shippingCost.collectAsStateWithLifecycle()
     val couponCode by viewModel.couponCode.collectAsStateWithLifecycle()
@@ -255,6 +257,7 @@ fun CheckoutScreen(
                 gateways = checkout.gateways,
                 selectedGateway = selectedGateway,
                 onSelectGateway = viewModel::selectGateway,
+                orderOutcome = orderOutcome,
                 shippingOptions = checkout.shippingOptions,
                 selectedShipping = selectedShipping,
                 onSelectShipping = viewModel::selectShipping,
@@ -400,6 +403,7 @@ private fun CheckoutOptions(
     gateways: List<PaymentGateway>,
     selectedGateway: PaymentGateway?,
     onSelectGateway: (PaymentGateway) -> Unit,
+    orderOutcome: OrderOutcome,
     shippingOptions: List<ShippingOption>,
     selectedShipping: ShippingOption?,
     onSelectShipping: (ShippingOption?) -> Unit,
@@ -418,6 +422,14 @@ private fun CheckoutOptions(
                     onSelect = { index -> onSelectGateway(gateways[index]) },
                 )
             }
+            // The payment method is what decides the order's status, so the consequence is stated
+            // where the choice is made — this used to be a standing setting nobody looked at.
+            Text(
+                text = orderOutcome.summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = Spacing.sm),
+            )
             if (shippingOptions.isNotEmpty()) {
                 SelectorRow(
                     label = "Shipping method",

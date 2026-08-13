@@ -3,6 +3,7 @@ package me.sourov.quicksale.data.remote
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.settings.CheckoutConfig
 import me.sourov.quicksale.data.settings.CurrencyPosition
+import me.sourov.quicksale.data.settings.OrderOutcome
 import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.ShippingOption
 import me.sourov.quicksale.data.settings.StoreCurrency
@@ -137,8 +138,9 @@ class WooCommerceApi(settings: StoreSettings) {
      * No billing block is sent: the store writes the organization's own billing address over
      * anything posted, so sending one changes nothing.
      *
-     * @param status WooCommerce status slug (e.g. "processing").
-     * @param setPaid whether to mark the order paid (records a payment date).
+     * @param outcome what state to create the order in, derived from [paymentMethod]. Its status is
+     *   omitted from the payload when null, which is what lets WooCommerce's own `payment_complete()`
+     *   choose between `processing` and `completed` for a paid order.
      * @param couponCode optional coupon the store validates and applies server-side.
      * @throws WooApiException with `woap_rest_cannot_purchase`, `woap_rest_shipping_destination`
      *   or `woap_rest_shipping_address` when the store refuses. No order exists after a refusal.
@@ -146,8 +148,7 @@ class WooCommerceApi(settings: StoreSettings) {
     suspend fun createOrder(
         customerId: Long,
         lineItems: List<LineItem>,
-        status: String,
-        setPaid: Boolean,
+        outcome: OrderOutcome,
         destination: Destination,
         paymentMethod: PaymentGateway? = null,
         shipping: ShippingSelection? = null,
@@ -155,8 +156,10 @@ class WooCommerceApi(settings: StoreSettings) {
     ): CreatedOrder {
         val payload = JSONObject().apply {
             put("customer_id", customerId)
-            put("status", status)
-            put("set_paid", setPaid)
+            // Sent only when the app has an opinion. WooCommerce creates an order with no status as
+            // `pending` and then lets `set_paid` move it, which is the whole point of leaving it out.
+            outcome.status?.let { put("status", it) }
+            put("set_paid", outcome.setPaid)
             paymentMethod?.let {
                 put("payment_method", it.id)
                 put("payment_method_title", it.title)

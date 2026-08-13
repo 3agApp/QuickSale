@@ -50,12 +50,6 @@ fun SettingsSectionScreen(
 
             SettingsSection.SYNC -> SyncSettingsSection()
 
-            SettingsSection.ORDERS -> OrderSettingsSection(
-                viewModel = viewModel(
-                    factory = OrderSettingsViewModel.factory(container.orderSettings),
-                ),
-            )
-
             SettingsSection.LABELS -> LabelSettingsSection(
                 viewModel = viewModel(
                     factory = LabelSettingsViewModel.factory(container.labelSettings),
