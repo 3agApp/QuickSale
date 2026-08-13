@@ -41,8 +41,8 @@ android {
         applicationId = "me.sourov.quicksale"
         minSdk = 28
         targetSdk = 37
-        versionCode = 18
-        versionName = "1.17"
+        versionCode = 19
+        versionName = "1.18"
         buildConfigField("String", "GITHUB_REPOSITORY", githubRepository.get().asBuildConfigString())
         buildConfigField("String", "GITHUB_RELEASES_API_URL", githubReleasesApiUrl.get().asBuildConfigString())
 
