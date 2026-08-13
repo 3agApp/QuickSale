@@ -13,8 +13,8 @@ import org.json.JSONObject
 import java.io.IOException
 
 /**
- * Persists the shop's per-country shipping [AddressForms] so a one-off delivery address can be
- * entered offline against the same field definitions the shop's checkout would render.
+ * Persists the shop's per-country [AddressForms], both shapes, so an address can be entered
+ * offline against the same field definitions the shop's checkout would render.
  * Refreshed alongside the organization snapshot.
  */
 class AddressFormRepository(private val dataStore: DataStore<Preferences>) {
@@ -34,53 +34,67 @@ class AddressFormRepository(private val dataStore: DataStore<Preferences>) {
     private fun encode(forms: AddressForms): String = JSONObject().apply {
         put("default_country", forms.defaultCountry)
         put("countries", forms.countries.toJson())
-        put("forms", JSONObject().apply {
-            forms.forms.forEach { (country, fields) ->
-                put(country, JSONArray().apply {
-                    fields.forEach { field ->
-                        put(JSONObject().apply {
-                            put("name", field.name)
-                            put("label", field.label)
-                            put("required", field.required)
-                            put("hidden", field.hidden)
-                            put("type", field.type)
-                            if (field.options.isNotEmpty()) put("options", field.options.toJson())
-                        })
-                    }
-                })
-            }
-        })
+        put("billing_countries", forms.sellToCountries.toJson())
+        put("forms", forms.forms.toJson())
+        put("billing_forms", forms.billingForms.toJson())
     }.toString()
 
     private fun decode(json: String): AddressForms? = runCatching {
         val obj = JSONObject(json)
-        val formsJson = obj.optJSONObject("forms")
         AddressForms(
             defaultCountry = obj.optString("default_country"),
             countries = obj.optJSONObject("countries").toStringMap(),
-            forms = buildMap {
-                formsJson?.keys()?.forEach { country ->
-                    val array = formsJson.optJSONArray(country) ?: return@forEach
-                    val fields = buildList(array.length()) {
-                        for (i in 0 until array.length()) {
-                            val field = array.optJSONObject(i) ?: continue
-                            add(
-                                AddressField(
-                                    name = field.optString("name"),
-                                    label = field.optString("label"),
-                                    required = field.optBoolean("required"),
-                                    hidden = field.optBoolean("hidden"),
-                                    type = field.optString("type").ifBlank { "text" },
-                                    options = field.optJSONObject("options").toStringMap(),
-                                )
-                            )
-                        }
-                    }
-                    if (fields.isNotEmpty()) put(country, fields)
-                }
-            },
+            forms = obj.optJSONObject("forms").toFormMap(),
+            // Both absent from anything written before the billing shape was stored. Left empty
+            // rather than filled from the shipping side, so [AddressForms] is the one place that
+            // decides what to fall back to.
+            sellToCountries = obj.optJSONObject("billing_countries").toStringMap(),
+            billingForms = obj.optJSONObject("billing_forms").toFormMap(),
         )
     }.getOrNull()
+
+    @JvmName("formsToJson")
+    private fun Map<String, List<AddressField>>.toJson(): JSONObject = JSONObject().apply {
+        forEach { (country, fields) ->
+            put(country, JSONArray().apply {
+                fields.forEach { field ->
+                    put(JSONObject().apply {
+                        put("name", field.name)
+                        put("label", field.label)
+                        put("required", field.required)
+                        put("hidden", field.hidden)
+                        put("type", field.type)
+                        if (field.options.isNotEmpty()) put("options", field.options.toJson())
+                    })
+                }
+            })
+        }
+    }
+
+    private fun JSONObject?.toFormMap(): Map<String, List<AddressField>> {
+        if (this == null) return emptyMap()
+        return buildMap {
+            keys().forEach { country ->
+                val array = optJSONArray(country) ?: return@forEach
+                val fields = buildList(array.length()) {
+                    for (i in 0 until array.length()) {
+                        val field = array.optJSONObject(i) ?: continue
+                        add(
+                            AddressField(
+                                name = field.optString("name"),
+                                label = field.optString("label"),
+                                required = field.optBoolean("required"),
+                                hidden = field.optBoolean("hidden"),
+                                type = field.optString("type").ifBlank { "text" },
+                                options = field.optJSONObject("options").toStringMap(),
+                            )
+                        )
+                    }
+                }
+                if (fields.isNotEmpty()) put(country, fields)
+            }
+        }
+    }
 
     private fun JSONObject?.toStringMap(): Map<String, String> {
         if (this == null) return emptyMap()

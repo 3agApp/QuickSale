@@ -76,6 +76,7 @@ fun OrganizationFormSheet(
     val addressForms by viewModel.addressForms.collectAsStateWithLifecycle()
     val country by viewModel.country.collectAsStateWithLifecycle()
     val fields by viewModel.fields.collectAsStateWithLifecycle()
+    val emailRequired by viewModel.emailRequired.collectAsStateWithLifecycle()
     val values by viewModel.values.collectAsStateWithLifecycle()
     val fieldErrors by viewModel.fieldErrors.collectAsStateWithLifecycle()
     val saving by viewModel.saving.collectAsStateWithLifecycle()
@@ -106,21 +107,30 @@ fun OrganizationFormSheet(
             )
 
             Spacer(Modifier.height(Spacing.lg))
+            // "Account name" rather than "Company name", because the billing block below
+            // used to carry a second field with that exact label and nothing on the screen
+            // said which one reached an invoice. The store now derives the billing company
+            // from this, so this is the only place the name is ever typed.
             OutlinedTextField(
                 value = name,
                 onValueChange = viewModel::setName,
-                label = { Text("Company name *") },
-                supportingText = fieldErrors["name"]?.let { { Text(it) } },
+                label = { Text("Account name *") },
+                supportingText = {
+                    Text(fieldErrors["name"] ?: "Printed on this account's invoices and delivery labels")
+                },
                 isError = fieldErrors["name"] != null,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
 
             Spacer(Modifier.height(Spacing.sm))
+            // The asterisk follows the store's own billing definition rather than being written in:
+            // this field sits outside the address form below, so nothing else would mark it, and a
+            // save refused over a blank the screen never flagged is a wasted trip to the counter.
             OutlinedTextField(
                 value = email,
                 onValueChange = viewModel::setEmail,
-                label = { Text("Billing email") },
+                label = { Text(if (emailRequired) "Billing email *" else "Billing email") },
                 supportingText = {
                     Text(fieldErrors["email"] ?: "Where the store sends this account's invoices")
                 },
@@ -170,6 +180,7 @@ fun OrganizationFormSheet(
                 values = values,
                 onSelectCountry = viewModel::selectCountry,
                 onFieldChange = viewModel::setField,
+                billing = true,
                 errors = fieldErrors,
             )
 

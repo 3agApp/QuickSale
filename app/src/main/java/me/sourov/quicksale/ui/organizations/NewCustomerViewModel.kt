@@ -94,12 +94,16 @@ class NewCustomerViewModel(
     /**
      * The billing form for the chosen country.
      *
-     * The shop's *shipping* field definitions are reused for billing deliberately: they are the
-     * same per-country address shape and the plugin serves only one form.
+     * The store's *billing* definitions, not the delivery ones — billing keeps WooCommerce's own
+     * rules where a delivery address relaxes them, and marking a required surname optional here
+     * would be a refusal at the counter over a rule the screen said did not apply. `email` is
+     * dropped because the sheet already asks the person for theirs, and it is the same address the
+     * company is billed at.
      */
     val fields: StateFlow<List<AddressField>> =
         combine(addressForms, _country) { forms, code ->
-            forms.fieldsFor(code.ifBlank { forms.defaultCountry })
+            forms.billingFieldsFor(code.ifBlank { forms.defaultCountry })
+                .filterNot { it.name == "email" }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _saving = MutableStateFlow(false)
@@ -151,7 +155,7 @@ class NewCustomerViewModel(
 
     fun selectCountry(code: String) {
         _country.value = code
-        val allowed = addressForms.value.fieldsFor(code).map { it.name }.toSet()
+        val allowed = addressForms.value.billingFieldsFor(code).map { it.name }.toSet()
         _values.value = _values.value.filterKeys { it in allowed } + ("country" to code)
     }
 

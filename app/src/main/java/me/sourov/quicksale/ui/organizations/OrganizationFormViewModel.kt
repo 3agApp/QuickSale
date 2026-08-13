@@ -68,15 +68,35 @@ class OrganizationFormViewModel(
     val values: StateFlow<Map<String, String>> = _values.asStateFlow()
 
     /**
-     * The address form for the chosen country.
+     * The billing form for the chosen country.
      *
-     * The shop's *shipping* definitions stand in for billing, as everywhere else in the app: the
-     * plugin serves one per-country address shape and billing is the same shape plus an email.
+     * The store's *billing* definitions, which are not the delivery ones: billing keeps
+     * WooCommerce's own rules where a delivery address relaxes them, so a surname the store
+     * requires is marked required here rather than optional. `email` is dropped because the sheet
+     * asks for it in its own field above, next to the name — two boxes for one answer is the
+     * mistake the company field made.
      */
     val fields: StateFlow<List<AddressField>> =
         combine(addressForms, _country) { forms, code ->
-            forms.fieldsFor(code.ifBlank { forms.defaultCountry })
+            forms.billingFieldsFor(code.ifBlank { forms.defaultCountry })
+                .filterNot { it.name == EMAIL }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Whether the store requires a billing email for the chosen country.
+     *
+     * Read from the same billing definitions as everything else rather than assumed, and carried
+     * across to the sheet's own email field: taking `email` out of the rendered form took its
+     * required-ness with it, and a field the store refuses a save over has to say so before the
+     * save, not after it. On this shop's countries it is required — as are the phone and the
+     * surname, which the delivery form marks optional.
+     */
+    val emailRequired: StateFlow<Boolean> =
+        combine(addressForms, _country) { forms, code ->
+            forms.billingFieldsFor(code.ifBlank { forms.defaultCountry })
+                .firstOrNull { it.name == EMAIL }
+                ?.required ?: false
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private val _saving = MutableStateFlow(false)
     val saving: StateFlow<Boolean> = _saving.asStateFlow()
@@ -114,7 +134,7 @@ class OrganizationFormViewModel(
 
     fun selectCountry(code: String) {
         _country.value = code
-        val allowed = addressForms.value.fieldsFor(code).map { it.name }.toSet()
+        val allowed = addressForms.value.billingFieldsFor(code).map { it.name }.toSet()
         _values.value = _values.value.filterKeys { it in allowed } + ("country" to code)
     }
 
@@ -126,8 +146,20 @@ class OrganizationFormViewModel(
     fun save() {
         if (_saving.value) return
         val companyName = _name.value.trim()
-        if (companyName.isBlank()) {
-            _fieldErrors.value = _fieldErrors.value + ("name" to "A company needs a name")
+        val mail = _email.value.trim()
+
+        // Checked here and not left to the store, for the two the sheet asks for in fields of its
+        // own: everything inside the address form carries its own required flag and the form marks
+        // it, but these two sit outside it. A store refusal for a blank the screen never flagged is
+        // a round trip the operator did not need to make.
+        val problems = buildMap {
+            if (companyName.isBlank()) put("name", "A company needs a name")
+            if (emailRequired.value && mail.isBlank()) {
+                put("email", "The store needs a billing email for this account")
+            }
+        }
+        if (problems.isNotEmpty()) {
+            _fieldErrors.value = _fieldErrors.value + problems
             return
         }
         _saving.value = true
@@ -144,12 +176,12 @@ class OrganizationFormViewModel(
                 // what that country has no field for, because [selectCountry] prunes _values.
                 //
                 // Note the store has the last word regardless: the plugin intersects a submitted
-                // address with the *billing* fields WooCommerce defines for that country and
-                // blanks the rest, so a key the shop has switched off — `company`, on a shop with
-                // Checkout → Company name set to Hidden — is cleared no matter what is sent here.
+                // address with the *billing* fields it defines for that country and blanks the
+                // rest, so `company` — which it no longer collects anywhere, deriving it from the
+                // account name on save — is cleared no matter what is sent from here.
                 val billing = _values.value + mapOf(
                     "country" to _country.value.ifBlank { addressForms.value.defaultCountry },
-                    "email" to _email.value.trim(),
+                    EMAIL to mail,
                 )
                 val updated = WoapApi(settings).updateOrganization(
                     organizationId = organization.id,
@@ -185,6 +217,9 @@ class OrganizationFormViewModel(
     fun consumeError() { _error.value = null }
 
     companion object {
+        /** The one billing field the sheet asks for outside the address form. */
+        private const val EMAIL = "email"
+
         fun factory(
             organization: Organization,
             organizationRepository: OrganizationRepository,

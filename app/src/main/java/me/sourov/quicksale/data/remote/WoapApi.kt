@@ -87,30 +87,37 @@ class WoapApi(settings: StoreSettings) {
     class AddressFormResult(val forms: AddressForms?, val etag: String?)
 
     /**
-     * Fetches `GET /wc-woap/v1/address-form` — the shop's per-country shipping field definitions.
-     * Revalidated the same way as the snapshot, and it changes rarely.
+     * Fetches `GET /wc-woap/v1/address-form` — the shop's per-country field definitions, delivery
+     * and billing. Revalidated the same way as the snapshot, and it changes rarely.
      */
     suspend fun fetchAddressForms(ifNoneMatch: String? = null): AddressFormResult {
         val response = http.get(path = "wc-woap/v1/address-form", ifNoneMatch = ifNoneMatch)
         if (response.notModified) return AddressFormResult(forms = null, etag = ifNoneMatch)
 
         val json = JSONObject(response.body)
-        val countries = json.optJSONObject("countries").toStringMap()
-        val formsJson = json.optJSONObject("forms")
-        val forms = buildMap {
-            formsJson?.keys()?.forEach { country ->
-                val fields = formsJson.optJSONArray(country).mapObjects { it.toAddressField() }
-                if (fields.isNotEmpty()) put(country, fields)
-            }
-        }
         return AddressFormResult(
             forms = AddressForms(
                 defaultCountry = json.optString("default_country"),
-                countries = countries,
-                forms = forms,
+                countries = json.optJSONObject("countries").toStringMap(),
+                forms = json.optJSONObject("forms").toFormMap(),
+                // Both absent from a store older than the billing form. Left empty rather than
+                // copied from the shipping side, so [AddressForms] is the one place that decides
+                // what to fall back to.
+                sellToCountries = json.optJSONObject("billing_countries").toStringMap(),
+                billingForms = json.optJSONObject("billing_forms").toFormMap(),
             ),
             etag = response.etag,
         )
+    }
+
+    private fun JSONObject?.toFormMap(): Map<String, List<AddressField>> {
+        if (this == null) return emptyMap()
+        return buildMap {
+            keys().forEach { country ->
+                val fields = optJSONArray(country).mapObjects { it.toAddressField() }
+                if (fields.isNotEmpty()) put(country, fields)
+            }
+        }
     }
 
     /**

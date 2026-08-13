@@ -199,6 +199,7 @@ fun NewCustomerSheet(
                         values = values,
                         onSelectCountry = viewModel::selectCountry,
                         onFieldChange = viewModel::setField,
+                        billing = true,
                         errors = fieldErrors,
                     )
                 }

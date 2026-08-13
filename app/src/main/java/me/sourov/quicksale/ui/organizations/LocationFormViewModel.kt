@@ -129,9 +129,10 @@ class LocationFormViewModel(
                 }
                 val api = WoapApi(settings)
                 // What the store already held, with the edited fields over the top. Posting only
-                // the *visible* fields blanks whatever this shop marks hidden — `company` on most
-                // shipping forms — and a country change still prunes what it should, because
-                // [selectCountry] filters _values.
+                // the *visible* fields blanks whatever the form doesn't draw — `company`, which
+                // the store no longer collects and fills with the account name instead — and a
+                // country change still prunes what it should, because [selectCountry] filters
+                // _values.
                 val payload = _values.value +
                     ("country" to _country.value.ifBlank { addressForms.value.defaultCountry })
                 // The first location is the one every order starts from whether or not the box was

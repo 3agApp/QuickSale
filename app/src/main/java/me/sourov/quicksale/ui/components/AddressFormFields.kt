@@ -34,8 +34,14 @@ import me.sourov.quicksale.ui.theme.Spacing
  * every country. Client-side validation stops at marking required fields — the store applies the
  * real rules (postcode format, states from the country's list) and its answers are authoritative.
  *
- * Both places the app composes an address use this: the delivery address on checkout, and the
- * location editor. They are the same field definitions, so they must look and behave the same.
+ * Every place the app composes an address uses this: the delivery address on checkout, the location
+ * editor, and the billing address on a company. They must look and behave the same.
+ *
+ * [billing] picks the country list, not the fields — pass the fields themselves from
+ * [AddressForms.billingFieldsFor]. The two lists differ because WooCommerce keeps them separately:
+ * a shop sells to more places than it ships to as soon as one customer's invoices go somewhere its
+ * couriers don't, and offering the ship-to list on a billing address would make that country
+ * unselectable.
  *
  * [errors] maps a field name to the store's own reason for refusing it, taken from `data.params`.
  */
@@ -49,6 +55,7 @@ fun AddressFormFields(
     onFieldChange: (String, String) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    billing: Boolean = false,
     errors: Map<String, String> = emptyMap(),
 ) {
     Column(
@@ -70,8 +77,16 @@ fun AddressFormFields(
                 // The country picker drives which form is rendered, so it gets its own control.
                 field.type == "country" -> AddressChoiceField(
                     label = field.label.ifBlank { "Country" },
-                    value = addressForms.countryName(country),
-                    choices = addressForms.countryChoices,
+                    value = if (billing) {
+                        addressForms.billingCountryName(country)
+                    } else {
+                        addressForms.countryName(country)
+                    },
+                    choices = if (billing) {
+                        addressForms.billingCountryChoices
+                    } else {
+                        addressForms.countryChoices
+                    },
                     onSelect = onSelectCountry,
                     required = field.required,
                     enabled = enabled,
