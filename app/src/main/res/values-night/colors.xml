@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark-theme splash background: the app's dark surface tone instead of stark black,
+         so the red logo still sits on a warm neutral like the rest of the dark scheme. -->
+    <color name="splash_background">#181616</color>
+</resources>

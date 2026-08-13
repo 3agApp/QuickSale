@@ -27,7 +27,7 @@
             android:exported="true"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.QuickSale">
+            android:theme="@style/Theme.QuickSale.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

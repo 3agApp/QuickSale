@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Splash background: white, matching how the 3ag logo is presented on shop.3ag.ch. -->
+    <color name="splash_background">#FFFFFF</color>
+</resources>

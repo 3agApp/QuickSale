@@ -5,7 +5,7 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Brand gradient (blue -> teal), matching ui.theme.BrandGradient. -->
+    <!-- Brand gradient (red -> gold), matching ui.theme.BrandGradient. -->
     <path android:pathData="M0,0h108v108h-108z">
         <aapt:attr name="android:fillColor">
             <gradient
@@ -14,8 +14,8 @@
                 android:endX="108"
                 android:endY="108"
                 android:type="linear">
-                <item android:color="#1E4FD0" android:offset="0.0" />
-                <item android:color="#0E7C6E" android:offset="1.0" />
+                <item android:color="#B21310" android:offset="0.0" />
+                <item android:color="#87651D" android:offset="1.0" />
             </gradient>
         </aapt:attr>
     </path>
