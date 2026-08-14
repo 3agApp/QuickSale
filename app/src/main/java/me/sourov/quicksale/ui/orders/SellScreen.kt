@@ -30,7 +30,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -57,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.scanner.ScannerHub
+import me.sourov.quicksale.ui.components.RepeatingStepperButton
 import me.sourov.quicksale.ui.products.ProductThumbnail
 import me.sourov.quicksale.ui.products.asPrice
 import me.sourov.quicksale.ui.theme.Sizes
@@ -192,6 +192,7 @@ fun SellScreen(
                             onIncrement = { viewModel.increment(line.product.id) },
                             onDecrement = { viewModel.decrement(line.product.id) },
                             onRemove = { viewModel.remove(line.product.id) },
+                            canStepDown = { viewModel.canStepDown(line.product.id) },
                         )
                         HorizontalDivider()
                     }
@@ -257,6 +258,8 @@ private fun CartLineRow(
     onIncrement: () -> Unit,
     onDecrement: () -> Unit,
     onRemove: () -> Unit,
+    /** Whether a held − may take another step, or has reached the last one before removal. */
+    canStepDown: () -> Boolean,
 ) {
     Row(
         modifier = Modifier
@@ -300,7 +303,11 @@ private fun CartLineRow(
                 }
             }
         }
-        FilledTonalIconButton(onClick = onDecrement) {
+        RepeatingStepperButton(
+            onStep = onDecrement,
+            contentDescription = if (line.quantity > 1) "Decrease" else "Remove",
+            repeatWhileHeld = canStepDown,
+        ) {
             Icon(
                 imageVector = if (line.quantity > 1) Icons.Filled.Remove else Icons.Outlined.Delete,
                 contentDescription = if (line.quantity > 1) "Decrease" else "Remove",
@@ -311,7 +318,7 @@ private fun CartLineRow(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(horizontal = Spacing.sm),
         )
-        FilledTonalIconButton(onClick = onIncrement) {
+        RepeatingStepperButton(onStep = onIncrement, contentDescription = "Increase") {
             Icon(Icons.Filled.Add, contentDescription = "Increase")
         }
     }

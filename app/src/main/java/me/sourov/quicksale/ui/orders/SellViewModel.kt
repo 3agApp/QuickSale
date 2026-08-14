@@ -59,6 +59,14 @@ data class CartLine(val product: Product, val quantity: Int) {
         get() = product.availableStock?.let { (quantity - it).coerceAtLeast(0) } ?: 0
 
     /**
+     * Whether stepping down again still leaves a line, rather than taking the product off the order.
+     *
+     * Asked through [stepped] rather than comparing against the pack size directly, so it can't
+     * drift from the snapping that actually decides the next quantity.
+     */
+    val canStepDown: Boolean get() = stepped(-1).quantity > 0
+
+    /**
      * This line moved [steps] of the product's order step, snapped onto a quantity the store
      * actually sells. A result of 0 means the line has fallen below the product's pack size.
      */
@@ -589,6 +597,17 @@ class SellViewModel(
     }
 
     fun decrement(productId: Long) = changeQuantity(productId, -1)
+
+    /**
+     * Whether a held − may keep running, read live rather than from the last composition.
+     *
+     * A hold is for bringing a quantity down; taking the product off the order is a separate
+     * decision, and it should cost a deliberate tap on the bin rather than arriving as the tail end
+     * of a hold nobody released in time. At the fastest the repeat reaches, a frame of stale state
+     * is a line already gone — so this reads the cart as it stands, not as it was last drawn.
+     */
+    fun canStepDown(productId: Long): Boolean =
+        _lines.value.firstOrNull { it.product.id == productId }?.canStepDown == true
 
     /**
      * Moves a line by [steps] of the product's own order step, never off it. Dropping below the

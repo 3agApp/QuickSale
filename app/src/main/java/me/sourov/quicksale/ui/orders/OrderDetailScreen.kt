@@ -31,7 +31,6 @@ import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,6 +58,7 @@ import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.ui.components.EmptyState
 import me.sourov.quicksale.ui.components.LoadingState
 import me.sourov.quicksale.ui.components.QuickSaleCard
+import me.sourov.quicksale.ui.components.RepeatingStepperButton
 import me.sourov.quicksale.ui.components.SectionHeader
 import me.sourov.quicksale.ui.products.asPrice
 import me.sourov.quicksale.ui.theme.Sizes
@@ -171,6 +171,7 @@ fun OrderDetailScreen(
                 onIncrement = viewModel::increment,
                 onDecrement = viewModel::decrement,
                 onRemove = viewModel::remove,
+                canStepDown = viewModel::canStepDown,
             )
 
             else -> ReadOnlyOrderContent(order = current, modifier = Modifier.padding(padding))
@@ -294,6 +295,7 @@ private fun EditableOrderContent(
     onIncrement: (Long) -> Unit,
     onDecrement: (Long) -> Unit,
     onRemove: (Long) -> Unit,
+    canStepDown: (Long) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -347,6 +349,7 @@ private fun EditableOrderContent(
                         onIncrement = { onIncrement(line.localKey) },
                         onDecrement = { onDecrement(line.localKey) },
                         onRemove = { onRemove(line.localKey) },
+                        canStepDown = { canStepDown(line.localKey) },
                     )
                     HorizontalDivider()
                 }
@@ -361,6 +364,8 @@ private fun EditableLineRow(
     onIncrement: () -> Unit,
     onDecrement: () -> Unit,
     onRemove: () -> Unit,
+    /** Whether a held − may take another step, or has reached the last one before removal. */
+    canStepDown: () -> Boolean,
 ) {
     Row(
         modifier = Modifier
@@ -381,7 +386,11 @@ private fun EditableLineRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        FilledTonalIconButton(onClick = onDecrement) {
+        RepeatingStepperButton(
+            onStep = onDecrement,
+            contentDescription = "Decrease",
+            repeatWhileHeld = canStepDown,
+        ) {
             Icon(Icons.Filled.Remove, contentDescription = "Decrease")
         }
         Text(
@@ -389,7 +398,7 @@ private fun EditableLineRow(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(horizontal = Spacing.sm),
         )
-        FilledTonalIconButton(onClick = onIncrement) {
+        RepeatingStepperButton(onStep = onIncrement, contentDescription = "Increase") {
             Icon(Icons.Filled.Add, contentDescription = "Increase")
         }
         IconButton(onClick = onRemove) {

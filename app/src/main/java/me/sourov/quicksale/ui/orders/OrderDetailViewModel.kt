@@ -197,6 +197,15 @@ class OrderDetailViewModel(
     fun increment(localKey: Long) = changeQuantity(localKey, +1)
     fun decrement(localKey: Long) = changeQuantity(localKey, -1)
 
+    /**
+     * Whether a held − may keep running: true while there is more than one left to take off.
+     *
+     * Dropping the line entirely is what the bin button is for — a hold should stop at one rather
+     * than run a product off the order on its way past.
+     */
+    fun canStepDown(localKey: Long): Boolean =
+        _workingLines.value.firstOrNull { it.localKey == localKey }?.let { it.quantity > 1 } == true
+
     private fun changeQuantity(localKey: Long, delta: Int) {
         _workingLines.value = _workingLines.value.mapNotNull { line ->
             if (line.localKey != localKey) {

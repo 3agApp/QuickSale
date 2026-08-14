@@ -7,6 +7,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +29,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,15 +37,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import me.sourov.quicksale.ui.theme.Sizes
 import me.sourov.quicksale.ui.theme.Spacing
 
@@ -285,3 +296,98 @@ fun EmptyState(
         }
     }
 }
+
+/**
+ * A stepper button that keeps firing while it is held down.
+ *
+ * Twenty-four of something is twenty-three taps otherwise, and at a counter with a queue that is
+ * the point where the operator gives up on the button. The first step lands on press so a tap still
+ * feels immediate; the repeat only begins once the press has outlived [HOLD_BEFORE_REPEAT_MS], so
+ * an ordinary tap is one step and never two. It speeds up while held, because someone still holding
+ * after a second wants a much larger number rather than a slightly larger one.
+ *
+ * The step is driven from the press gesture rather than `onClick`, which would otherwise fire again
+ * on release and leave the quantity one above what the operator watched it reach. `onClick` is left
+ * to the accessibility action, where a single activation is exactly what is meant.
+ */
+@Composable
+fun RepeatingStepperButton(
+    onStep: () -> Unit,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    /**
+     * Asked before every repeated step, to stop a hold short of somewhere a tap may still go.
+     *
+     * The cart's − is the case it exists for: holding it should bring the quantity down and stop
+     * at the last one, leaving removing the product to a deliberate tap on the bin. A lambda rather
+     * than a flag so the answer can be read live — at 40ms a step, a frame of stale state is a line
+     * already gone.
+     */
+    repeatWhileHeld: () -> Boolean = { true },
+    content: @Composable () -> Unit,
+) {
+    // Read through the latest composition's lambda: a stepper whose action closes over the current
+    // value (`onChange(value + 1)`) hands us a new one every step, and the stale one would pin the
+    // quantity at its second value for the whole hold.
+    val step by rememberUpdatedState(onStep)
+    val stepEnabled by rememberUpdatedState(enabled)
+    val mayRepeat by rememberUpdatedState(repeatWhileHeld)
+
+    FilledTonalIconButton(
+        // Empty on purpose: the gesture below owns every step. Left in place so the button keeps
+        // its ripple, focus and button role, with the activation an assistive tool sends restored
+        // through the semantics action.
+        onClick = {},
+        enabled = enabled,
+        modifier = modifier
+            .semantics {
+                onClick(label = contentDescription) {
+                    if (stepEnabled) step()
+                    true
+                }
+            }
+            .pointerInput(Unit) {
+                coroutineScope {
+                    val gestures = this
+                    awaitEachGesture {
+                        // requireUnconsumed = false is the whole trick: the button's own clickable
+                        // sits further down the chain and has already consumed this press by the
+                        // time it reaches here. We are watching it, not competing for it.
+                        awaitFirstDown(requireUnconsumed = false)
+                        if (!stepEnabled) return@awaitEachGesture
+
+                        step()
+                        val repeat = gestures.launch {
+                            delay(HOLD_BEFORE_REPEAT_MS)
+                            var interval = REPEAT_START_MS
+                            // Stops on its own when the button disables under it — a copies
+                            // stepper at its maximum — or when the hold has reached the last
+                            // step it is allowed to take on its own.
+                            while (stepEnabled && mayRepeat()) {
+                                step()
+                                delay(interval)
+                                interval = (interval - REPEAT_STEP_MS).coerceAtLeast(REPEAT_MIN_MS)
+                            }
+                        }
+                        // Returns null when the finger slides off instead of lifting; both end it.
+                        waitForUpOrCancellation()
+                        repeat.cancel()
+                    }
+                }
+            },
+        content = { content() },
+    )
+}
+
+/** How long a press must be held before it starts repeating, in milliseconds. */
+private const val HOLD_BEFORE_REPEAT_MS = 400L
+
+/** The gap between the first repeated steps, before it accelerates. */
+private const val REPEAT_START_MS = 140L
+
+/** How much each repeat shortens the gap to the next one. */
+private const val REPEAT_STEP_MS = 12L
+
+/** The fastest the repeat gets — roughly 25 steps a second, still readable as it climbs. */
+private const val REPEAT_MIN_MS = 40L

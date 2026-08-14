@@ -27,7 +27,6 @@ import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -60,6 +59,7 @@ import me.sourov.quicksale.device.printer.LcPrintDriver
 import me.sourov.quicksale.device.printer.NoPrinterDriver
 import me.sourov.quicksale.ui.components.IconBadge
 import me.sourov.quicksale.ui.components.QuickSaleCard
+import me.sourov.quicksale.ui.components.RepeatingStepperButton
 import me.sourov.quicksale.ui.components.SectionHeader
 import me.sourov.quicksale.ui.products.ProductThumbnail
 import me.sourov.quicksale.ui.products.asPrice
@@ -521,8 +521,9 @@ private fun LabelStepper(
     ) {
         Text(label, style = MaterialTheme.typography.titleSmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            FilledTonalIconButton(
-                onClick = { onChange(value - 1) },
+            RepeatingStepperButton(
+                onStep = { onChange(value - 1) },
+                contentDescription = "Decrease $label",
                 enabled = value > min,
             ) {
                 Icon(Icons.Filled.Remove, contentDescription = "Decrease $label")
@@ -532,8 +533,9 @@ private fun LabelStepper(
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = Spacing.lg),
             )
-            FilledTonalIconButton(
-                onClick = { onChange(value + 1) },
+            RepeatingStepperButton(
+                onStep = { onChange(value + 1) },
+                contentDescription = "Increase $label",
                 enabled = value < max,
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "Increase $label")

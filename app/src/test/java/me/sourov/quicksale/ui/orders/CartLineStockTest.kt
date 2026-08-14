@@ -75,6 +75,27 @@ class CartLineStockTest {
         assertEquals(3, CartLine(product, quantity = 3).beyondStock)
     }
 
+    @Test
+    fun a_line_above_one_may_still_be_stepped_down() {
+        assertEquals(true, CartLine(product(stockQuantity = 50), quantity = 2).canStepDown)
+        assertEquals(true, CartLine(product(stockQuantity = 50), quantity = 9).canStepDown)
+    }
+
+    @Test
+    fun the_last_one_may_not_be_stepped_down() {
+        // Held − stops here; taking the product off the order is the bin button's job.
+        assertEquals(false, CartLine(product(stockQuantity = 50), quantity = 1).canStepDown)
+    }
+
+    @Test
+    fun a_pack_size_product_stops_at_its_pack_rather_than_at_one() {
+        // Sold in sixes: 12 comes down to 6, and 6 is the last quantity that is still an order.
+        val sixes = product(stockQuantity = 50).copy(minOrderQuantity = 6, orderQuantityStep = 6)
+
+        assertEquals(true, CartLine(sixes, quantity = 12).canStepDown)
+        assertEquals(false, CartLine(sixes, quantity = 6).canStepDown)
+    }
+
     private fun product(
         stockQuantity: Int?,
         stockStatus: String = if ((stockQuantity ?: 0) > 0) "instock" else Product.STOCK_OUT_OF_STOCK,

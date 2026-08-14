@@ -34,7 +34,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -63,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import me.sourov.quicksale.ui.components.RepeatingStepperButton
 import me.sourov.quicksale.ui.theme.Corners
 import me.sourov.quicksale.ui.theme.Sizes
 import me.sourov.quicksale.ui.theme.Spacing
@@ -379,7 +379,10 @@ private fun StepperRow(
     ) {
         Text(label, style = MaterialTheme.typography.bodyLarge)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            FilledTonalIconButton(onClick = onDecrease) {
+            RepeatingStepperButton(
+                onStep = onDecrease,
+                contentDescription = "Decrease $label",
+            ) {
                 Icon(Icons.Filled.Remove, contentDescription = "Decrease $label")
             }
             Text(
@@ -387,7 +390,10 @@ private fun StepperRow(
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
-            FilledTonalIconButton(onClick = onIncrease) {
+            RepeatingStepperButton(
+                onStep = onIncrease,
+                contentDescription = "Increase $label",
+            ) {
                 Icon(Icons.Filled.Add, contentDescription = "Increase $label")
             }
         }
