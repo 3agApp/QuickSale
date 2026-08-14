@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import me.sourov.quicksale.data.local.Member
+import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.ProductRepository
 import me.sourov.quicksale.data.remote.WooCommerceApi
@@ -58,10 +60,26 @@ class OrderDetailViewModel(
     private val orderId: Long,
     private val settingsRepository: SettingsRepository,
     private val productRepository: ProductRepository,
+    organizationRepository: OrganizationRepository,
 ) : ViewModel() {
 
     private val _order = MutableStateFlow<WooCommerceApi.OrderDetail?>(null)
     val order: StateFlow<WooCommerceApi.OrderDetail?> = _order.asStateFlow()
+
+    /**
+     * The person who placed this order, looked up locally from the id the order carries.
+     *
+     * Null is an ordinary answer rather than a fault — the buyer may have been taken off the
+     * account since, or this device may not have synced them yet — and the screen falls back to
+     * the billing contact rather than leaving the question unanswered.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val placedBy: StateFlow<Member?> = _order
+        .flatMapLatest { order ->
+            val userId = order?.customerId ?: 0L
+            if (userId <= 0L) flowOf(null) else organizationRepository.memberByUserId(userId)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
@@ -301,9 +319,15 @@ class OrderDetailViewModel(
             orderId: Long,
             settingsRepository: SettingsRepository,
             productRepository: ProductRepository,
+            organizationRepository: OrganizationRepository,
         ) = viewModelFactory {
             initializer {
-                OrderDetailViewModel(orderId, settingsRepository, productRepository)
+                OrderDetailViewModel(
+                    orderId = orderId,
+                    settingsRepository = settingsRepository,
+                    productRepository = productRepository,
+                    organizationRepository = organizationRepository,
+                )
             }
         }
     }

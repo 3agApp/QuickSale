@@ -59,6 +59,9 @@ val QuickSaleShapes = Shapes(
 object Sizes {
     val avatar = 40.dp
     val avatarSmall = 32.dp
+
+    /** The monogram at the head of a detail page, where it is the subject rather than a bullet. */
+    val avatarLarge = 56.dp
     val icon = 20.dp
     val iconLarge = 24.dp
     val thumbnail = 48.dp

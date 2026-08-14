@@ -50,9 +50,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.sourov.quicksale.data.local.Member
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.ui.components.EmptyState
@@ -77,6 +79,7 @@ fun OrderDetailScreen(
     modifier: Modifier = Modifier,
 ) {
     val order by viewModel.order.collectAsStateWithLifecycle()
+    val placedBy by viewModel.placedBy.collectAsStateWithLifecycle()
     val loading by viewModel.loading.collectAsStateWithLifecycle()
     val editing by viewModel.editing.collectAsStateWithLifecycle()
     val workingLines by viewModel.workingLines.collectAsStateWithLifecycle()
@@ -174,7 +177,11 @@ fun OrderDetailScreen(
                 canStepDown = viewModel::canStepDown,
             )
 
-            else -> ReadOnlyOrderContent(order = current, modifier = Modifier.padding(padding))
+            else -> ReadOnlyOrderContent(
+                order = current,
+                placedBy = placedBy,
+                modifier = Modifier.padding(padding),
+            )
         }
     }
 
@@ -183,7 +190,11 @@ fun OrderDetailScreen(
 
 /** What the order has on it right now, with no way to change it. */
 @Composable
-private fun ReadOnlyOrderContent(order: WooCommerceApi.OrderDetail, modifier: Modifier = Modifier) {
+private fun ReadOnlyOrderContent(
+    order: WooCommerceApi.OrderDetail,
+    placedBy: Member?,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -208,6 +219,46 @@ private fun ReadOnlyOrderContent(order: WooCommerceApi.OrderDetail, modifier: Mo
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        Spacer(Modifier.height(Spacing.sectionSpacing))
+        SectionHeader(title = "Account")
+        Spacer(Modifier.height(Spacing.sectionGap))
+        QuickSaleCard {
+            Column(Modifier.padding(Spacing.md)) {
+                if (order.organizationName.isNotBlank()) {
+                    DetailRow("Company", order.organizationName)
+                }
+                if (order.locationName.isNotBlank()) {
+                    DetailRow("Location", order.locationName)
+                }
+                // The buyer, named from this device's copy of the account. Falling back to the
+                // billing contact is not a guess — on an order with no member left to find, that
+                // name is the only person the store still associates with it.
+                val buyerName = placedBy?.name?.takeIf { it.isNotBlank() }
+                    ?: order.billing.name.takeIf { it.isNotBlank() }
+                DetailRow(
+                    label = "Placed by",
+                    value = buyerName ?: "Customer #${order.customerId}",
+                )
+                placedBy?.email?.takeIf { it.isNotBlank() }?.let { DetailRow("Email", it) }
+                if (order.paymentMethodTitle.isNotBlank()) {
+                    DetailRow("Payment", order.paymentMethodTitle)
+                }
+            }
+        }
+
+        if (order.customerNote.isNotBlank()) {
+            Spacer(Modifier.height(Spacing.sectionSpacing))
+            SectionHeader(title = "Customer note")
+            Spacer(Modifier.height(Spacing.sectionGap))
+            QuickSaleCard {
+                Text(
+                    text = order.customerNote,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(Spacing.md),
+                )
+            }
         }
 
         Spacer(Modifier.height(Spacing.sectionSpacing))
@@ -253,7 +304,100 @@ private fun ReadOnlyOrderContent(order: WooCommerceApi.OrderDetail, modifier: Mo
                 }
             }
         }
+
+        Spacer(Modifier.height(Spacing.sectionSpacing))
+        SectionHeader(title = "Delivery")
+        Spacer(Modifier.height(Spacing.sectionGap))
+        QuickSaleCard {
+            Column(Modifier.padding(Spacing.md)) {
+                if (order.shipping.isEmpty) {
+                    // No delivery address is a fact about the order, not missing data: it is what a
+                    // sale the customer carried off the stand looks like.
+                    Text(
+                        text = "Nothing to deliver — taken from the counter.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    AddressBlock(order.shipping)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(Spacing.sectionSpacing))
+        SectionHeader(title = "Billing")
+        Spacer(Modifier.height(Spacing.sectionGap))
+        QuickSaleCard {
+            Column(Modifier.padding(Spacing.md)) {
+                if (order.billing.isEmpty) {
+                    Text(
+                        text = "The store holds no billing address for this order.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    AddressBlock(order.billing)
+                }
+            }
+        }
         Spacer(Modifier.height(Spacing.xl))
+    }
+}
+
+/**
+ * One address, laid out the way it would be written on an envelope.
+ *
+ * Contact details sit under the address rather than beside it, because they are what the counter
+ * actually reaches for — a delivery to chase, an invoice query to answer.
+ */
+@Composable
+private fun AddressBlock(address: WooCommerceApi.OrderAddress) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        address.name.takeIf { it.isNotBlank() }?.let {
+            Text(it, style = MaterialTheme.typography.titleSmall)
+        }
+        address.company.takeIf { it.isNotBlank() }?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        address.streetLines.forEach { line ->
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (address.email.isNotBlank() || address.phone.isNotBlank()) {
+            Spacer(Modifier.height(Spacing.xs))
+            address.email.takeIf { it.isNotBlank() }?.let { DetailRow("Email", it) }
+            address.phone.takeIf { it.isNotBlank() }?.let { DetailRow("Phone", it) }
+        }
+    }
+}
+
+/** A labelled fact, for the rows that are read rather than scanned. */
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = Spacing.xs),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(Spacing.md))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.End,
+        )
     }
 }
 

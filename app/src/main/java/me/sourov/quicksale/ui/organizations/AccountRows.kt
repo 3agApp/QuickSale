@@ -52,8 +52,11 @@ fun MemberRow(
 ) {
     val canOrder = member.canPlaceOrders && organizationCanTrade
     QuickSaleCard(
+        // Tapping opens the person, which is worth doing whether or not they may buy — someone the
+        // store is refusing is precisely who you open to find out why. Only the *ordering* was ever
+        // gated on [canOrder], and that decision has moved to their own page.
         modifier = modifier.let {
-            if (onClick != null) it.clickable(enabled = canOrder, onClick = onClick) else it
+            if (onClick != null) it.clickable(onClick = onClick) else it
         },
     ) {
         Row(
@@ -124,13 +127,13 @@ fun MemberRow(
                     }
                 }
             }
-            // The chevron says the row starts an order; the pencil is the way to change the
-            // person instead. Two glyphs because they are two different intentions, and a row that
-            // did both from one tap is how you bill the wrong company.
-            if (canOrder && onClick != null) {
+            // The chevron says the row opens this person; the pencil is the way to change them
+            // instead. Two glyphs because they are two different intentions, and a row that did
+            // both from one tap is how you edit somebody you only meant to look at.
+            if (onClick != null) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = "Start an order for ${member.name}",
+                    contentDescription = "Open ${member.name}",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(Sizes.iconLarge),
                 )

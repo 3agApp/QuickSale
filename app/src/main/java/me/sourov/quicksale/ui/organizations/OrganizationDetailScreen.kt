@@ -78,14 +78,16 @@ import me.sourov.quicksale.ui.theme.Spacing
  * record, a person is a login, a location is somewhere a van goes. Each tab carries its own add and
  * edit, so managing one never means scrolling past the other two.
  *
- * Selling is preserved as it was: tapping a person still starts their order, which is the fastest
- * path from "these people are at the stand" to a cart. Editing them is a separate, explicit tap.
+ * Tapping a person opens that person, rather than starting their order. Ordering lives on their own
+ * page now, alongside what the store will actually let them do — a company's list of people is a
+ * place you arrive to *look* something up, and one tap that quietly re-pointed the till was too
+ * heavy an outcome for a row you might only have meant to read. Editing stays a separate tap.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrganizationDetailScreen(
     organizationId: Long,
-    onStartOrder: (memberUserId: Long) -> Unit,
+    onOpenMember: (memberUserId: Long) -> Unit,
     onViewOrders: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -212,7 +214,7 @@ fun OrganizationDetailScreen(
                 AccountTab.PEOPLE -> PeopleTab(
                     members = members,
                     organizationCanTrade = current.orgStatus.canTrade,
-                    onStartOrder = onStartOrder,
+                    onOpenMember = onOpenMember,
                     onEdit = { editingMember = MemberEdit(it) },
                     onAdd = { editingMember = MemberEdit(null) },
                 )
@@ -429,7 +431,7 @@ private fun CompanyTab(organization: Organization, onEdit: () -> Unit) {
 private fun PeopleTab(
     members: List<Member>,
     organizationCanTrade: Boolean,
-    onStartOrder: (memberUserId: Long) -> Unit,
+    onOpenMember: (memberUserId: Long) -> Unit,
     onEdit: (Member) -> Unit,
     onAdd: () -> Unit,
 ) {
@@ -442,7 +444,7 @@ private fun PeopleTab(
         onAdd = onAdd,
     ) {
         Text(
-            text = "Tap somebody to start their order.",
+            text = "Tap somebody to see their details and start an order.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -451,7 +453,7 @@ private fun PeopleTab(
             MemberRow(
                 member = member,
                 organizationCanTrade = organizationCanTrade,
-                onClick = { onStartOrder(member.userId) },
+                onClick = { onOpenMember(member.userId) },
                 onEdit = { onEdit(member) },
             )
             Spacer(Modifier.height(Spacing.sm))

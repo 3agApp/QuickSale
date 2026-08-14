@@ -41,6 +41,8 @@ import me.sourov.quicksale.ui.orders.OrderListViewModel
 import me.sourov.quicksale.ui.orders.OrdersScreen
 import me.sourov.quicksale.ui.orders.SellScreen
 import me.sourov.quicksale.ui.orders.SellViewModel
+import me.sourov.quicksale.ui.organizations.MemberDetailScreen
+import me.sourov.quicksale.ui.organizations.MemberDetailViewModel
 import me.sourov.quicksale.ui.print.QuickPrintScreen
 import me.sourov.quicksale.ui.organizations.OrganizationDetailScreen
 import me.sourov.quicksale.ui.organizations.OrganizationsScreen
@@ -67,6 +69,19 @@ object Routes {
 
     const val PENDING_REVIEW = "pending_review"
     fun pendingReview(id: Long) = "$PENDING_REVIEW/$id"
+
+    /**
+     * One person on an account, addressed by their company and their WordPress user id.
+     *
+     * The user id rather than the membership row id, because it is the same value an order is
+     * stamped with — the page's whole purpose is to start one.
+     */
+    const val MEMBER_DETAIL = "member_detail"
+    const val MEMBER_USER_ID_ARG = "userId"
+    const val MEMBER_DETAIL_ROUTE =
+        "$MEMBER_DETAIL/{$ORGANIZATION_ID_ARG}/{$MEMBER_USER_ID_ARG}"
+    fun memberDetail(organizationId: Long, userId: Long) =
+        "$MEMBER_DETAIL/$organizationId/$userId"
 
     const val ORDER_LIST = "order_list"
     const val ORDER_LIST_ROUTE = "$ORDER_LIST/{$ORGANIZATION_ID_ARG}"
@@ -144,7 +159,8 @@ object Routes {
      * Distinct from [isFullScreen]: these keep the bottom navigation, because they are reached from
      * a tab and leaving them for another tab is a normal thing to want.
      */
-    private val OWN_TOP_BAR_ROUTES = setOf(ORDER_LIST, ORDER_DETAIL, ORGANIZATION_DETAIL)
+    private val OWN_TOP_BAR_ROUTES =
+        setOf(ORDER_LIST, ORDER_DETAIL, ORGANIZATION_DETAIL, MEMBER_DETAIL)
 
     fun ownsTopBar(route: String?): Boolean = route?.toRouteBase() in OWN_TOP_BAR_ROUTES
 
@@ -247,15 +263,18 @@ fun QuickSaleNavHost(
                 // arrangement as the cart's company sheet.
                 creating = creatingCustomer,
                 onCreatingChange = onCreatingCustomerChange,
-                onOrganizationClick = { organization ->
-                    val route = if (organization.orgStatus == OrganizationStatus.PENDING) {
+                onAccountOpen = { organizationId, status ->
+                    val route = if (status == OrganizationStatus.PENDING) {
                         // An account waiting for approval isn't one you can sell to, so the tap
                         // goes to the only useful thing: reviewing it.
-                        Routes.pendingReview(organization.id)
+                        Routes.pendingReview(organizationId)
                     } else {
-                        Routes.organizationDetail(organization.id)
+                        Routes.organizationDetail(organizationId)
                     }
                     navController.navigate(route)
+                },
+                onPersonOpen = { organizationId, userId ->
+                    navController.navigate(Routes.memberDetail(organizationId, userId))
                 },
             )
         }
@@ -295,12 +314,41 @@ fun QuickSaleNavHost(
             arguments = listOf(navArgument(Routes.ORGANIZATION_ID_ARG) { type = NavType.LongType }),
         ) { backStackEntry ->
             val id = backStackEntry.arguments?.getLong(Routes.ORGANIZATION_ID_ARG) ?: 0L
-            OrganizationDetail(
+            OrganizationDetailScreen(
                 organizationId = id,
-                sellViewModel = sellViewModel,
-                onStarted = navController::returnToSell,
+                onOpenMember = { userId ->
+                    navController.navigate(Routes.memberDetail(id, userId))
+                },
                 onViewOrders = { navController.navigate(Routes.orderList(id)) },
                 onBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            route = Routes.MEMBER_DETAIL_ROUTE,
+            arguments = listOf(
+                navArgument(Routes.ORGANIZATION_ID_ARG) { type = NavType.LongType },
+                navArgument(Routes.MEMBER_USER_ID_ARG) { type = NavType.LongType },
+            ),
+        ) { backStackEntry ->
+            val context = LocalContext.current
+            val container = remember(context) { context.appContainer }
+            val organizationId = backStackEntry.arguments?.getLong(Routes.ORGANIZATION_ID_ARG) ?: 0L
+            val userId = backStackEntry.arguments?.getLong(Routes.MEMBER_USER_ID_ARG) ?: 0L
+            val startOrder = rememberStartOrder(sellViewModel, navController::returnToSell)
+            val viewModel: MemberDetailViewModel = viewModel(
+                factory = MemberDetailViewModel.factory(
+                    organizationId = organizationId,
+                    userId = userId,
+                    repository = container.organizations,
+                ),
+            )
+            MemberDetailScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() },
+                onOpenCompany = { id -> navController.navigate(Routes.organizationDetail(id)) },
+                onPlaceOrder = { member ->
+                    startOrder(Customer(member.organizationId, member.userId))
+                },
             )
         }
         composable(
@@ -334,6 +382,7 @@ fun QuickSaleNavHost(
                     orderId = orderId,
                     settingsRepository = container.settings,
                     productRepository = container.products,
+                    organizationRepository = container.organizations,
                 ),
             )
             OrderDetailScreen(
@@ -403,50 +452,31 @@ fun QuickSaleNavHost(
 }
 
 /**
- * One account, with a guard around the cart it is about to take over.
+ * The guarded way to point the standing cart at a customer, shared by every screen that offers it.
  *
- * Tapping a member starts that person's order on the *standing* cart — the one shared with the Sell
- * tab. When that cart already holds someone else's items, silently re-pointing it at a new customer
- * bills one company for another company's goods, and nothing on screen says so. It happened during
- * testing and produced a real order on the store.
- *
- * So a cart with items belonging to a different customer asks first, and the confirming action
- * empties it. Moving items between customers is still possible — deliberately, via *Change* on the
- * checkout — but it is no longer what a single tap on a name does.
+ * Returns the function to call with whoever the order is for; the confirmation it may need is
+ * rendered here, so a caller cannot accidentally get the un-guarded version. Everything the guard
+ * exists for is described on [OrganizationDetail].
  */
 @Composable
-private fun OrganizationDetail(
-    organizationId: Long,
+private fun rememberStartOrder(
     sellViewModel: SellViewModel,
     onStarted: () -> Unit,
-    onViewOrders: () -> Unit,
-    onBack: () -> Unit,
-) {
+): (Customer) -> Unit {
     val lines by sellViewModel.lines.collectAsStateWithLifecycle()
     val customer by sellViewModel.customer.collectAsStateWithLifecycle()
     val heldFor by sellViewModel.organization.collectAsStateWithLifecycle()
-    var pendingMemberUserId by remember { mutableStateOf<Long?>(null) }
+    var pending by remember { mutableStateOf<Customer?>(null) }
 
-    fun start(memberUserId: Long) {
-        sellViewModel.selectCustomer(Customer(organizationId, memberUserId))
+    fun start(wanted: Customer) {
+        sellViewModel.selectCustomer(wanted)
         onStarted()
     }
 
-    OrganizationDetailScreen(
-        organizationId = organizationId,
-        onStartOrder = { memberUserId ->
-            val wanted = Customer(organizationId, memberUserId)
-            val occupied = lines.isNotEmpty() && customer != null && customer != wanted
-            if (occupied) pendingMemberUserId = memberUserId else start(memberUserId)
-        },
-        onViewOrders = onViewOrders,
-        onBack = onBack,
-    )
-
-    pendingMemberUserId?.let { memberUserId ->
+    pending?.let { wanted ->
         val itemCount = lines.sumOf { it.quantity }
         AlertDialog(
-            onDismissRequest = { pendingMemberUserId = null },
+            onDismissRequest = { pending = null },
             title = { Text("There's already an order open") },
             text = {
                 Text(
@@ -457,18 +487,23 @@ private fun OrganizationDetail(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        pendingMemberUserId = null
+                        pending = null
                         sellViewModel.clearCart()
-                        start(memberUserId)
+                        start(wanted)
                     },
                 ) {
                     Text("Clear and start")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingMemberUserId = null }) { Text("Keep it") }
+                TextButton(onClick = { pending = null }) { Text("Keep it") }
             },
         )
+    }
+
+    return { wanted ->
+        val occupied = lines.isNotEmpty() && customer != null && customer != wanted
+        if (occupied) pending = wanted else start(wanted)
     }
 }
 

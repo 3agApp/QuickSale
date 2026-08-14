@@ -94,7 +94,20 @@ data class Member(
 ) {
     val isAdmin: Boolean get() = role.equals("admin", ignoreCase = true)
 
-    val roleLabel: String get() = if (isAdmin) "Admin" else "Member"
+    /** Just the given name, for addressing this person in a button or a sentence. */
+    val firstName: String get() = name.trim().substringBefore(' ')
+
+    /**
+     * What this person may do *on their own account*, named so it can't be read as anything larger.
+     *
+     * "Admin" alone reads as an administrator of the shop — someone with the run of the store — when
+     * what it actually means is a buyer who may add a colleague to their own company. The two are a
+     * long way apart, and the label is the only thing on screen that distinguishes them.
+     *
+     * There is no matching "Company member": the plain role needs no qualifying, and only ever
+     * appears on a page that has already said which company is being talked about.
+     */
+    val roleLabel: String get() = if (isAdmin) "Company admin" else "Member"
 
     /** A membership is [STATUS_ACTIVE] or `inactive`; only an active one may be sold to. */
     val isActive: Boolean get() = status.equals(STATUS_ACTIVE, ignoreCase = true)

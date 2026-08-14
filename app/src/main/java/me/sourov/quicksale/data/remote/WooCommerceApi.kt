@@ -235,6 +235,60 @@ class WooCommerceApi(settings: StoreSettings) {
         val total: String,
     )
 
+    /**
+     * One of an order's two addresses, as WooCommerce holds it.
+     *
+     * Kept as separate fields rather than a pre-joined block because the counter is usually reading
+     * one line out loud — a phone number, a postcode — and because which lines are worth showing
+     * differs between the two: billing carries the contact details, delivery rarely does.
+     */
+    data class OrderAddress(
+        val firstName: String,
+        val lastName: String,
+        val company: String,
+        val address1: String,
+        val address2: String,
+        val city: String,
+        val state: String,
+        val postcode: String,
+        val country: String,
+        val email: String,
+        val phone: String,
+    ) {
+        val name: String
+            get() = listOf(firstName, lastName).filter { it.isNotBlank() }.joinToString(" ")
+
+        /**
+         * True when the store sent this address empty, which is what a counter sale looks like —
+         * nothing was delivered, so there is nothing to print.
+         */
+        val isEmpty: Boolean
+            get() = listOf(
+                firstName, lastName, company, address1, address2, city, state, postcode, country,
+            ).all { it.isBlank() }
+
+        /**
+         * The street block, one line per line of an envelope.
+         *
+         * State and postcode join the town the way most of the world writes them; the country sits
+         * on its own. Blank fields are dropped rather than left as empty rows, so a Swiss address
+         * with no state doesn't print a gap where one would be.
+         */
+        val streetLines: List<String>
+            get() = buildList {
+                if (address1.isNotBlank()) add(address1)
+                if (address2.isNotBlank()) add(address2)
+                val town = listOf(postcode, city).filter { it.isNotBlank() }.joinToString(" ")
+                val region = listOf(town, state).filter { it.isNotBlank() }.joinToString(", ")
+                if (region.isNotBlank()) add(region)
+                if (country.isNotBlank()) add(country)
+            }
+
+        companion object {
+            val EMPTY = OrderAddress("", "", "", "", "", "", "", "", "", "", "")
+        }
+    }
+
     /** A full order: its totals, stamps and every line item on it. */
     data class OrderDetail(
         val id: Long,
@@ -249,6 +303,12 @@ class WooCommerceApi(settings: StoreSettings) {
         val organizationName: String,
         val locationName: String,
         val lineItems: List<OrderLineItem>,
+        val billing: OrderAddress = OrderAddress.EMPTY,
+        val shipping: OrderAddress = OrderAddress.EMPTY,
+        /** How the order is to be paid, in the store's own words — e.g. "Pay by invoice". */
+        val paymentMethodTitle: String = "",
+        /** Whatever the customer asked for in writing, when the order carries a note. */
+        val customerNote: String = "",
     ) {
         /**
          * Whether the counter may still add or remove products.
@@ -358,7 +418,32 @@ class WooCommerceApi(settings: StoreSettings) {
         organizationName = optString("woap_organization_name").decodeHtmlEntities(),
         locationName = optString("woap_location_name").decodeHtmlEntities(),
         lineItems = optJSONArray("line_items").toOrderLineItems(),
+        billing = optJSONObject("billing").toOrderAddress(),
+        shipping = optJSONObject("shipping").toOrderAddress(),
+        paymentMethodTitle = optString("payment_method_title").decodeHtmlEntities(),
+        customerNote = optString("customer_note").decodeHtmlEntities(),
     )
+
+    /**
+     * Reads one of the order's addresses. A missing block is an empty address, not an error: a
+     * counter sale carries no delivery address at all, and WooCommerce simply omits it.
+     */
+    private fun JSONObject?.toOrderAddress(): OrderAddress {
+        if (this == null) return OrderAddress.EMPTY
+        return OrderAddress(
+            firstName = optString("first_name").decodeHtmlEntities(),
+            lastName = optString("last_name").decodeHtmlEntities(),
+            company = optString("company").decodeHtmlEntities(),
+            address1 = optString("address_1").decodeHtmlEntities(),
+            address2 = optString("address_2").decodeHtmlEntities(),
+            city = optString("city").decodeHtmlEntities(),
+            state = optString("state").decodeHtmlEntities(),
+            postcode = optString("postcode"),
+            country = optString("country"),
+            email = optString("email"),
+            phone = optString("phone"),
+        )
+    }
 
     private fun JSONArray?.toOrderLineItems(): List<OrderLineItem> {
         if (this == null) return emptyList()

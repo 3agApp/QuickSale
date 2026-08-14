@@ -27,6 +27,58 @@ interface OrganizationDao {
     )
     fun pagingSource(query: String, status: String): PagingSource<Int, Organization>
 
+    /**
+     * The same list read from the other end: every person, under the company they buy for.
+     *
+     * One search box has to answer both halves of the question, because the operator at the stand
+     * knows one of two things — the name of the person in front of them, or the name of the shop
+     * they came from — and never reliably which. So a person matches on their own name and email
+     * *and* on their company's name, town, email and phone; the row that comes back names both,
+     * which is the answer either way.
+     *
+     * Ordered by company first so the list groups, and by person within it. The status narrows on
+     * the *organization*, matching the company view's filter: a person's own membership status is
+     * shown on their row rather than filtered on, since an inactive person on an active account is
+     * exactly what someone auditing the account has come to find.
+     */
+    @Query(
+        """
+        SELECT m.*,
+               o.name AS organizationName,
+               o.city AS organizationCity,
+               o.status AS organizationStatus
+        FROM org_members m
+        JOIN organizations o ON o.id = m.organizationId
+        WHERE (:query = ''
+           OR m.name LIKE '%' || :query || '%'
+           OR m.email LIKE '%' || :query || '%'
+           OR o.name LIKE '%' || :query || '%'
+           OR o.city LIKE '%' || :query || '%'
+           OR o.email LIKE '%' || :query || '%'
+           OR o.phone LIKE '%' || :query || '%')
+          AND (:status = '' OR o.status = :status)
+        ORDER BY o.name COLLATE NOCASE, m.name COLLATE NOCASE
+        """
+    )
+    fun memberPagingSource(query: String, status: String): PagingSource<Int, MemberWithOrganization>
+
+    @Query(
+        """
+        SELECT COUNT(*)
+        FROM org_members m
+        JOIN organizations o ON o.id = m.organizationId
+        WHERE (:query = ''
+           OR m.name LIKE '%' || :query || '%'
+           OR m.email LIKE '%' || :query || '%'
+           OR o.name LIKE '%' || :query || '%'
+           OR o.city LIKE '%' || :query || '%'
+           OR o.email LIKE '%' || :query || '%'
+           OR o.phone LIKE '%' || :query || '%')
+          AND (:status = '' OR o.status = :status)
+        """
+    )
+    fun countMatchingMembers(query: String, status: String): Flow<Int>
+
     @Query(
         """
         SELECT COUNT(*) FROM organizations
@@ -105,6 +157,16 @@ interface OrganizationDao {
 
     @Query("SELECT * FROM org_members WHERE organizationId = :organizationId AND userId = :userId LIMIT 1")
     fun observeMember(organizationId: Long, userId: Long): Flow<Member?>
+
+    /**
+     * The person behind a WordPress user id, whichever company they buy for.
+     *
+     * An order names its buyer by user id alone, so reading it back cannot go through an
+     * organization the way the rest of this DAO does. Null is an ordinary answer: the order may
+     * predate a sync, or the member may have since been taken off the account.
+     */
+    @Query("SELECT * FROM org_members WHERE userId = :userId LIMIT 1")
+    fun observeMemberByUserId(userId: Long): Flow<Member?>
 
     @Query(
         """
@@ -209,6 +271,20 @@ data class SellableCustomer(
     @Embedded val member: Member,
     val organizationName: String,
     val organizationCity: String,
+)
+
+/**
+ * One person with the company they buy for, for the Accounts tab's people view.
+ *
+ * Carries the organization's status as well as its name because the people list is filtered by it
+ * exactly as the company list is — "show me everyone on a suspended account" is the same question
+ * asked from the other end.
+ */
+data class MemberWithOrganization(
+    @Embedded val member: Member,
+    val organizationName: String,
+    val organizationCity: String,
+    val organizationStatus: String,
 )
 
 /** How many members and locations one organization has, for the list rows. */

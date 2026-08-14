@@ -13,6 +13,15 @@ class OrganizationRepository(private val dao: OrganizationDao) {
     fun countMatching(query: String, status: String = ""): Flow<Int> =
         dao.countMatching(query.trim(), status)
 
+    /** The same accounts read as people rather than companies, for the Accounts tab's other view. */
+    fun memberPagingSource(
+        query: String,
+        status: String = "",
+    ): PagingSource<Int, MemberWithOrganization> = dao.memberPagingSource(query.trim(), status)
+
+    fun countMatchingMembers(query: String, status: String = ""): Flow<Int> =
+        dao.countMatchingMembers(query.trim(), status)
+
     fun organization(id: Long): Flow<Organization?> = dao.observeById(id)
 
     /** People the till can sell to, matching [query] against their name, email or company. */
@@ -37,6 +46,9 @@ class OrganizationRepository(private val dao: OrganizationDao) {
 
     fun member(organizationId: Long, userId: Long): Flow<Member?> =
         dao.observeMember(organizationId, userId)
+
+    /** The person behind a WordPress user id — how an order names the buyer who placed it. */
+    fun memberByUserId(userId: Long): Flow<Member?> = dao.observeMemberByUserId(userId)
 
     fun locations(organizationId: Long): Flow<List<OrgLocation>> = dao.observeLocations(organizationId)
 

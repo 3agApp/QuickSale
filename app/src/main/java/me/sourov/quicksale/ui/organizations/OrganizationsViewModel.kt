@@ -25,13 +25,32 @@ import me.sourov.quicksale.data.settings.SettingsRepository
 import me.sourov.quicksale.data.local.Organization
 import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.OrganizationStatus
+import me.sourov.quicksale.data.local.MemberWithOrganization
 import me.sourov.quicksale.data.local.OrganizationTally
+
+/**
+ * Which way round the Accounts tab is reading the same data.
+ *
+ * Both views answer "who can we sell to", from the two directions the counter arrives at it: the
+ * company, which is what an order actually belongs to and what gets approved or suspended, and the
+ * person, which is who is standing at the stand. Neither is a subset of the other, so the tab
+ * carries both rather than picking a side.
+ */
+enum class AccountsView(val label: String) {
+    COMPANIES("Companies"),
+    PEOPLE("People"),
+}
 
 class OrganizationsViewModel(private val repository: OrganizationRepository) : ViewModel() {
 
     private val _query = MutableStateFlow("")
 
     private val _statusFilter = MutableStateFlow<OrganizationStatus?>(null)
+
+    private val _view = MutableStateFlow(AccountsView.COMPANIES)
+
+    /** Whether the tab is listing companies or the people inside them. */
+    val view: StateFlow<AccountsView> = _view.asStateFlow()
 
     /** The status the list is narrowed to, or null for every status. */
     val statusFilter: StateFlow<OrganizationStatus?> = _statusFilter.asStateFlow()
@@ -46,6 +65,21 @@ class OrganizationsViewModel(private val repository: OrganizationRepository) : V
         .flatMapLatest { (query, status) ->
             Pager(PagingConfig(pageSize = 30, enablePlaceholders = false)) {
                 repository.pagingSource(query, status)
+            }.flow
+        }
+        .cachedIn(viewModelScope)
+
+    /**
+     * The people view's rows, already ordered so equal companies sit together.
+     *
+     * A separate pager rather than a mapping of [organizations], because the two lists page over
+     * different row counts — one company with nine members is one row here and nine rows there.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val people: Flow<PagingData<MemberWithOrganization>> = criteria
+        .flatMapLatest { (query, status) ->
+            Pager(PagingConfig(pageSize = 30, enablePlaceholders = false)) {
+                repository.memberPagingSource(query, status)
             }.flow
         }
         .cachedIn(viewModelScope)
@@ -67,6 +101,8 @@ class OrganizationsViewModel(private val repository: OrganizationRepository) : V
     fun setQuery(value: String) { _query.value = value }
 
     fun setStatusFilter(status: OrganizationStatus?) { _statusFilter.value = status }
+
+    fun setView(value: AccountsView) { _view.value = value }
 
     companion object {
         fun factory(repository: OrganizationRepository) = viewModelFactory {

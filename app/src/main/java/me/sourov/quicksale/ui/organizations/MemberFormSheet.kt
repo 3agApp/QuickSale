@@ -158,7 +158,7 @@ fun MemberFormSheet(
 
             Spacer(Modifier.height(Spacing.md))
             ToggleRow(
-                title = "Administrator",
+                title = "Company administrator",
                 detail = if (isAdmin) {
                     "Can manage this company, its people and its locations."
                 } else {
