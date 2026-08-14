@@ -2,6 +2,8 @@ package me.sourov.quicksale
 
 import android.app.Application
 import android.content.Context
+import coil.ImageLoader
+import coil.ImageLoaderFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,6 +15,7 @@ import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.ProductRepository
 import me.sourov.quicksale.data.local.QuickSaleDatabase
 import me.sourov.quicksale.data.net.ConnectivityMonitor
+import me.sourov.quicksale.data.remote.InsecureTls
 import me.sourov.quicksale.data.scanner.ScannerConfigRepository
 import me.sourov.quicksale.data.settings.AddressFormRepository
 import me.sourov.quicksale.data.settings.BackorderRepository
@@ -79,9 +82,20 @@ class AppContainer(context: Context) {
     val updatePreferences by lazy { AppUpdatePreferences(dataStore) }
 }
 
-class QuickSaleApplication : Application() {
+class QuickSaleApplication : Application(), ImageLoaderFactory {
 
     val container: AppContainer by lazy { AppContainer(this) }
+
+    /**
+     * Product images go through the same trust decision the REST calls do.
+     *
+     * Without this a store on an untrusted certificate connects for its JSON and then fails every
+     * photo on the handshake, which reads as a broken catalog rather than the one certificate
+     * problem the REST calls just stepped over.
+     */
+    override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
+        .okHttpClient { InsecureTls.imageOkHttpClient() }
+        .build()
 }
 
 /**

@@ -150,6 +150,9 @@ class WooHttp(private val settings: StoreSettings) {
         var connection: HttpURLConnection? = null
         try {
             connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                // Before anything else: a store on an untrusted certificate fails the handshake
+                // here, and no header or timeout set below would ever reach the wire.
+                InsecureTls.applyTo(this)
                 requestMethod = method
                 connectTimeout = TIMEOUT_MS
                 readTimeout = TIMEOUT_MS

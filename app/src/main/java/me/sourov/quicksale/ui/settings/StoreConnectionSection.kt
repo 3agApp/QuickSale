@@ -136,6 +136,17 @@ fun StoreConnectionSection(
             modifier = Modifier.fillMaxWidth(),
         )
 
+        // Certificates are not checked (see InsecureTls), which is what lets a store on a
+        // self-signed or internal certificate work at all. Said plainly here rather than nowhere:
+        // the API keys below travel over a connection the app can't prove belongs to your store.
+        Spacer(Modifier.height(Spacing.sm))
+        Text(
+            text = "Stores with a self-signed or internal certificate are accepted — the " +
+                "connection is encrypted, but not verified.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
         Spacer(Modifier.height(Spacing.lg))
         Text(
             text = "API keys",

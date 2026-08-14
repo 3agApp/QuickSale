@@ -95,6 +95,7 @@ dependencies {
     implementation(libs.androidx.paging.runtime)
     implementation(libs.androidx.paging.compose)
     implementation(libs.coil.compose)
+    implementation(libs.okhttp)
     implementation(libs.zxing.android.embedded)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
