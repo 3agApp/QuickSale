@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import me.sourov.quicksale.data.local.Member
 import me.sourov.quicksale.data.local.OrgLocation
@@ -25,6 +26,24 @@ import me.sourov.quicksale.data.local.OrganizationRepository
 data class OrderBlocker(val reason: String)
 
 /**
+ * Whether this page has a person to show, in the three states it actually has.
+ *
+ * "Not read yet" and "no longer there" are different answers, and only one of them is worth putting
+ * on screen — the other is a page that briefly accuses itself of not finding somebody it is about
+ * to display. The distinction also carries the removal: a person who *was* here and now isn't has
+ * just been taken off the account, and the page should get out of the way rather than sit there
+ * describing a hole.
+ */
+sealed interface MemberState {
+    data object Loading : MemberState
+
+    /** Read, and there is no such membership — removed, or an id that never matched. */
+    data object Missing : MemberState
+
+    data class Found(val member: Member) : MemberState
+}
+
+/**
  * One person on an account: who they are, what the store lets them do, and the company they buy for.
  *
  * A person is the thing an order is actually stamped with, so they had earned a page of their own —
@@ -37,7 +56,12 @@ class MemberDetailViewModel(
     repository: OrganizationRepository,
 ) : ViewModel() {
 
-    val member: StateFlow<Member?> = repository.member(organizationId, userId)
+    val state: StateFlow<MemberState> = repository.member(organizationId, userId)
+        .map { found -> found?.let(MemberState::Found) ?: MemberState.Missing }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MemberState.Loading)
+
+    val member: StateFlow<Member?> = state
+        .map { (it as? MemberState.Found)?.member }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val organization: StateFlow<Organization?> = repository.organization(organizationId)

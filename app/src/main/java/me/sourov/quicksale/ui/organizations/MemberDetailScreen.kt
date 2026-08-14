@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.PointOfSale
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,7 +30,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -65,12 +70,30 @@ fun MemberDetailScreen(
     onPlaceOrder: (Member) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val member by viewModel.member.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val organization by viewModel.organization.collectAsStateWithLifecycle()
     val locations by viewModel.locations.collectAsStateWithLifecycle()
     val blocker by viewModel.blocker.collectAsStateWithLifecycle()
 
-    val current = member
+    var editing by rememberSaveable { mutableStateOf(false) }
+
+    /**
+     * Leave when the person we were showing is taken off the account.
+     *
+     * Only once they have actually been seen: an id that never matched is a genuine "not found"
+     * worth saying, while somebody who was here a moment ago has just been removed — usually by the
+     * sheet on this very screen — and the honest next screen is the list they came from.
+     */
+    var everFound by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state) {
+        when (state) {
+            is MemberState.Found -> everFound = true
+            MemberState.Missing -> if (everFound) onBack()
+            MemberState.Loading -> Unit
+        }
+    }
+
+    val current = (state as? MemberState.Found)?.member
 
     Scaffold(
         modifier = modifier,
@@ -89,6 +112,15 @@ fun MemberDetailScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    // Editing is offered for anyone the page can show, including someone the store
+                    // won't let order — changing exactly that is one of the things the sheet is for.
+                    if (current != null) {
+                        IconButton(onClick = { editing = true }) {
+                            Icon(Icons.Outlined.Edit, contentDescription = "Edit person")
+                        }
+                    }
+                },
             )
         },
         bottomBar = {
@@ -102,12 +134,15 @@ fun MemberDetailScreen(
         },
     ) { padding ->
         if (current == null) {
-            EmptyState(
-                modifier = Modifier.padding(padding).fillMaxSize(),
-                icon = Icons.Outlined.Person,
-                title = "Person not found",
-                message = "They may have been removed from the account.",
-            )
+            // Loading draws nothing rather than a "not found" it is about to contradict.
+            if (state is MemberState.Missing) {
+                EmptyState(
+                    modifier = Modifier.padding(padding).fillMaxSize(),
+                    icon = Icons.Outlined.Person,
+                    title = "Person not found",
+                    message = "They may have been removed from the account.",
+                )
+            }
             return@Scaffold
         }
 
@@ -171,6 +206,18 @@ fun MemberDetailScreen(
 
             Spacer(Modifier.height(Spacing.xl))
         }
+    }
+
+    // The same sheet the company's People tab opens, so there is one idea of what editing a person
+    // means. It writes through to the local copy itself, which is what this page reads — so a saved
+    // change is already on screen behind the sheet as it closes, and a removal takes the page with it.
+    if (editing && current != null) {
+        MemberFormSheet(
+            organizationId = current.organizationId,
+            existing = current,
+            onDismiss = { editing = false },
+            onDone = { editing = false },
+        )
     }
 }
 
