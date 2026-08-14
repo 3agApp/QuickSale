@@ -1,13 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-   Production network policy: block cleartext (plain HTTP) so the WooCommerce
-   consumer key/secret are never sent unencrypted. ConnectionTester already
-   normalizes bare store URLs to https://, so this only blocks an explicit http://.
-   The debug build overrides this file (app/src/debug/res/xml) to permit cleartext
-   for local http test stores.
+   Cleartext is permitted, because a store URL may legitimately be an http:// one: a
+   proxied or LAN-only WooCommerce install that serves no TLS at all. Settings makes
+   that an explicit choice — the scheme is a control next to the URL field, https by
+   default, and picking http says so in red right under it.
+
+   The trust anchors below apply whenever Settings' "Allow insecure connection" switch
+   is off. With it on — the default, because the fleet's terminals need it — InsecureTls
+   replaces the trust manager and certificates are not validated at all. See its KDoc.
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false">
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

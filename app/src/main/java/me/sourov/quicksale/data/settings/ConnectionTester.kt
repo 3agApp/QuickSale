@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.sourov.quicksale.data.remote.WooApiException
 import me.sourov.quicksale.data.remote.WooHttp
+import me.sourov.quicksale.data.remote.isCertificateTrustFailure
 
 sealed interface ConnectionResult {
     data class Success(val message: String) : ConnectionResult
@@ -23,7 +24,7 @@ sealed interface ConnectionResult {
 class ConnectionTester {
 
     suspend fun test(settings: StoreSettings): ConnectionResult = withContext(Dispatchers.IO) {
-        if (normalizeHttpsSiteUrl(settings.siteUrl) == null) {
+        if (normalizeSiteUrl(settings.siteUrl) == null) {
             return@withContext ConnectionResult.Failure("Enter a valid store URL")
         }
         if (settings.consumerKey.isBlank() || settings.consumerSecret.isBlank()) {
@@ -37,7 +38,7 @@ class ConnectionTester {
         } catch (e: WooApiException) {
             return@withContext ConnectionResult.Failure(wooFailure(e))
         } catch (e: Exception) {
-            return@withContext ConnectionResult.Failure(e.message ?: "Could not reach the store")
+            return@withContext ConnectionResult.Failure(reachFailure(e, settings))
         }
 
         try {
@@ -60,6 +61,21 @@ class ConnectionTester {
                 "WooCommerce is connected, but organizations couldn't be reached: ${e.message}"
             )
         }
+    }
+
+    /**
+     * Names the one failure the operator can fix from this screen.
+     *
+     * A rejected certificate arrives as "Chain validation failed", which reads like a bug in the
+     * app rather than a property of the store — and the fix is a switch a few lines further down
+     * the same screen, so the message says so instead of repeating the platform's wording.
+     */
+    private fun reachFailure(e: Exception, settings: StoreSettings): String = when {
+        isCertificateTrustFailure(e) && !settings.allowInsecureTls ->
+            "The store's HTTPS certificate couldn't be verified. If it's self-signed or from an " +
+                "internal CA, turn on \"Allow insecure connection\" below and test again."
+
+        else -> e.message ?: "Could not reach the store"
     }
 
     private fun wooFailure(e: WooApiException): String = when (e.status) {

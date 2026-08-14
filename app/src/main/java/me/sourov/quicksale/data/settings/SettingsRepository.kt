@@ -3,6 +3,7 @@ package me.sourov.quicksale.data.settings
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -24,6 +25,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         val SITE_URL = stringPreferencesKey("site_url")
         val CONSUMER_KEY = stringPreferencesKey("consumer_key")
         val CONSUMER_SECRET = stringPreferencesKey("consumer_secret")
+        val ALLOW_INSECURE_TLS = booleanPreferencesKey("allow_insecure_tls")
     }
 
     val settings: Flow<StoreSettings> = dataStore.data
@@ -36,14 +38,18 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
                 siteUrl = prefs[Keys.SITE_URL].orEmpty(),
                 consumerKey = prefs[Keys.CONSUMER_KEY].orEmpty(),
                 consumerSecret = prefs[Keys.CONSUMER_SECRET].orEmpty(),
+                // Absent for every install that predates the switch, and they are all running with
+                // it effectively on — so the fallback has to be on, or updating breaks them.
+                allowInsecureTls = prefs[Keys.ALLOW_INSECURE_TLS] ?: true,
             )
         }
 
     suspend fun update(settings: StoreSettings) {
         dataStore.edit { prefs ->
-            prefs[Keys.SITE_URL] = normalizeHttpsSiteUrl(settings.siteUrl).orEmpty()
+            prefs[Keys.SITE_URL] = normalizeSiteUrl(settings.siteUrl).orEmpty()
             prefs[Keys.CONSUMER_KEY] = settings.consumerKey.trim()
             prefs[Keys.CONSUMER_SECRET] = settings.consumerSecret.trim()
+            prefs[Keys.ALLOW_INSECURE_TLS] = settings.allowInsecureTls
         }
     }
 }

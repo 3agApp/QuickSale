@@ -28,7 +28,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,7 +58,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import me.sourov.quicksale.appContainer
 import me.sourov.quicksale.data.settings.HTTPS_SITE_URL_PREFIX
-import me.sourov.quicksale.data.settings.hasHttpsSiteUrlHost
+import me.sourov.quicksale.data.settings.HTTP_SITE_URL_PREFIX
+import me.sourov.quicksale.data.settings.hasSiteUrlHost
 import me.sourov.quicksale.data.settings.settingsDataStore
 import me.sourov.quicksale.data.sync.SyncEtagRepository
 import me.sourov.quicksale.data.sync.SyncManager
@@ -110,15 +115,15 @@ fun StoreConnectionSection(
         )
 
         Spacer(Modifier.height(Spacing.lg))
-        val isIncompleteUrl = !hasHttpsSiteUrlHost(state.siteHost)
+        val isIncompleteUrl = !hasSiteUrlHost(state.siteHost)
         OutlinedTextField(
             value = state.siteHost,
             onValueChange = viewModel::onSiteUrlChange,
             label = { Text("Site URL") },
             placeholder = { Text("yourstore.com") },
-            // The scheme is an adornment, not editable text: QuickSale only talks HTTPS, and a
-            // prefix the operator can backspace into is a prefix they can corrupt.
-            prefix = { Text(HTTPS_SITE_URL_PREFIX) },
+            // The scheme is an adornment, not editable text — a prefix the operator can backspace
+            // into is a prefix they can corrupt. The segmented control below sets it instead.
+            prefix = { Text(state.siteScheme) },
             leadingIcon = { Icon(Icons.Outlined.Language, contentDescription = null) },
             singleLine = true,
             supportingText = if (isIncompleteUrl) {
@@ -136,16 +141,21 @@ fun StoreConnectionSection(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        // Certificates are not checked (see InsecureTls), which is what lets a store on a
-        // self-signed or internal certificate work at all. Said plainly here rather than nowhere:
-        // the API keys below travel over a connection the app can't prove belongs to your store.
         Spacer(Modifier.height(Spacing.sm))
-        Text(
-            text = "Stores with a self-signed or internal certificate are accepted — the " +
-                "connection is encrypted, but not verified.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        SiteSchemePicker(
+            scheme = state.siteScheme,
+            onSchemeChange = viewModel::onSiteSchemeChange,
         )
+
+        if (state.siteScheme == HTTP_SITE_URL_PREFIX) {
+            Spacer(Modifier.height(Spacing.sm))
+            Text(
+                text = "Plain HTTP: the API keys are sent unencrypted and readable by anything on " +
+                    "the network. Use it only on a network you control.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
 
         Spacer(Modifier.height(Spacing.lg))
         Text(
@@ -218,6 +228,15 @@ fun StoreConnectionSection(
                 ),
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            // Only meaningful over https — there is no certificate on an http store to skip.
+            if (state.siteScheme != HTTP_SITE_URL_PREFIX) {
+                Spacer(Modifier.height(Spacing.lg))
+                InsecureConnectionToggle(
+                    checked = state.allowInsecureTls,
+                    onCheckedChange = viewModel::onAllowInsecureTlsChange,
+                )
+            }
 
             Spacer(Modifier.height(Spacing.lg))
             OutlinedButton(
@@ -294,6 +313,93 @@ private fun CredentialEntryChooser(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Enter manually")
+            }
+        }
+    }
+}
+
+/**
+ * Whether to skip certificate checking, for a store Android's trust store won't vouch for.
+ *
+ * On by default, because that is what the fleet's stores need — so this is worded as what it costs
+ * rather than what it enables, and carries the warning colours while it is on. Turning it off is
+ * the safer position, and the card goes quiet to say so.
+ */
+@Composable
+private fun InsecureConnectionToggle(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val containerColor = if (checked) {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
+    }
+    val onContainerColor = if (checked) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+
+    QuickSaleCard(containerColor = containerColor) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Icon(
+                imageVector = if (checked) Icons.Outlined.WarningAmber else Icons.Outlined.Lock,
+                contentDescription = null,
+                tint = onContainerColor,
+                modifier = Modifier.size(24.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Allow insecure connection",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = onContainerColor,
+                )
+                Text(
+                    text = if (checked) {
+                        "Certificate checks are off. Traffic is still encrypted, but the app can't " +
+                            "confirm it's your store — anything on the network could read the API " +
+                            "keys. Turn it off if your store's certificate works on its own."
+                    } else {
+                        "The store's HTTPS certificate is checked normally. Turn this on for a " +
+                            "self-signed, internal or otherwise unverifiable certificate."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = onContainerColor.copy(alpha = 0.85f),
+                )
+            }
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        }
+    }
+}
+
+/**
+ * Picks the scheme the store is reached over.
+ *
+ * A control rather than editable text for the same reason the prefix is an adornment: two values
+ * are the whole range, and typing them by hand is how the field used to end up holding
+ * `https://https://`. Pasting a full `http://…` URL into the field moves this too.
+ */
+@Composable
+private fun SiteSchemePicker(
+    scheme: String,
+    onSchemeChange: (String) -> Unit,
+) {
+    val options = listOf(HTTPS_SITE_URL_PREFIX, HTTP_SITE_URL_PREFIX)
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, option ->
+            SegmentedButton(
+                selected = scheme == option,
+                onClick = { onSchemeChange(option) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+            ) {
+                Text(option.removeSuffix("://"))
             }
         }
     }

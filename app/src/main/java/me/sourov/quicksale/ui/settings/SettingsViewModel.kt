@@ -6,12 +6,15 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import me.sourov.quicksale.data.settings.ConnectionResult
 import me.sourov.quicksale.data.settings.ConnectionTester
+import me.sourov.quicksale.data.settings.HTTPS_SITE_URL_PREFIX
 import me.sourov.quicksale.data.settings.SettingsRepository
 import me.sourov.quicksale.data.settings.StoreSettings
 import me.sourov.quicksale.data.settings.WooKeyParser
-import me.sourov.quicksale.data.settings.hasHttpsSiteUrlHost
-import me.sourov.quicksale.data.settings.normalizeHttpsSiteUrl
+import me.sourov.quicksale.data.settings.hasSiteUrlHost
+import me.sourov.quicksale.data.settings.namesSiteScheme
+import me.sourov.quicksale.data.settings.normalizeSiteUrl
 import me.sourov.quicksale.data.settings.toSiteHostInput
+import me.sourov.quicksale.data.settings.toSiteUrlParts
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,10 +34,14 @@ sealed interface ConnectionTestState {
 }
 
 data class SettingsUiState(
-    /** Just the host — the field renders "https://" as a fixed, non-editable prefix. */
+    /** Just the host — the scheme is a fixed, non-editable prefix with its own control. */
     val siteHost: String = "",
+    /** `https://` or `http://`, kept out of [siteHost] so it can't be half-deleted. */
+    val siteScheme: String = HTTPS_SITE_URL_PREFIX,
     val consumerKey: String = "",
     val consumerSecret: String = "",
+    /** Whether to talk to this store without checking its TLS certificate. */
+    val allowInsecureTls: Boolean = true,
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
     /** Persisted values, used for connection status and unsaved-change detection. */
@@ -46,17 +53,22 @@ data class SettingsUiState(
     private val hasCredentials: Boolean
         get() = consumerKey.isNotBlank() && consumerSecret.isNotBlank()
 
+    /** The `scheme://host` this screen would save, ready for [normalizeSiteUrl]. */
+    val siteUrlInput: String get() = siteScheme + siteHost
+
     val isDirty: Boolean
         get() = siteHost != saved.siteUrl.toSiteHostInput() ||
+            siteScheme != saved.siteUrl.toSiteUrlParts().scheme ||
             consumerKey != saved.consumerKey ||
-            consumerSecret != saved.consumerSecret
+            consumerSecret != saved.consumerSecret ||
+            allowInsecureTls != saved.allowInsecureTls
 
     val canSave: Boolean
-        get() = !isSaving && isDirty && hasHttpsSiteUrlHost(siteHost) && hasCredentials
+        get() = !isSaving && isDirty && hasSiteUrlHost(siteHost) && hasCredentials
 
     val canTest: Boolean
         get() = connectionTest != ConnectionTestState.Testing &&
-            hasHttpsSiteUrlHost(siteHost) && hasCredentials
+            hasSiteUrlHost(siteHost) && hasCredentials
 }
 
 class SettingsViewModel(
@@ -79,6 +91,8 @@ class SettingsViewModel(
                     if (state.isLoading) {
                         state.copy(
                             siteHost = stored.siteUrl.toSiteHostInput(),
+                            siteScheme = stored.siteUrl.toSiteUrlParts().scheme,
+                            allowInsecureTls = stored.allowInsecureTls,
                             consumerKey = stored.consumerKey,
                             consumerSecret = stored.consumerSecret,
                             saved = stored,
@@ -95,7 +109,22 @@ class SettingsViewModel(
     }
 
     fun onSiteUrlChange(value: String) = _uiState.update {
-        it.copy(siteHost = value.toSiteHostInput(), connectionTest = ConnectionTestState.Idle)
+        it.copy(
+            siteHost = value.toSiteHostInput(),
+            // A pasted `http://…` moves the switch for the operator; typing a bare host leaves it
+            // wherever they put it, since every keystroke would otherwise snap it back to https.
+            siteScheme = if (value.namesSiteScheme()) value.toSiteUrlParts().scheme else it.siteScheme,
+            connectionTest = ConnectionTestState.Idle,
+        )
+    }
+
+    fun onSiteSchemeChange(scheme: String) = _uiState.update {
+        it.copy(siteScheme = scheme, connectionTest = ConnectionTestState.Idle)
+    }
+
+    /** Clears any previous test result: the last one was reached under the other trust setting. */
+    fun onAllowInsecureTlsChange(value: Boolean) = _uiState.update {
+        it.copy(allowInsecureTls = value, connectionTest = ConnectionTestState.Idle)
     }
 
     fun onConsumerKeyChange(value: String) = _uiState.update {
@@ -132,7 +161,7 @@ class SettingsViewModel(
         if (!state.canTest) return
         viewModelScope.launch {
             _uiState.update { it.copy(connectionTest = ConnectionTestState.Testing) }
-            val normalizedSiteUrl = normalizeHttpsSiteUrl(state.siteHost)
+            val normalizedSiteUrl = normalizeSiteUrl(state.siteUrlInput)
                 ?: return@launch _uiState.update {
                     it.copy(connectionTest = ConnectionTestState.Failure("Enter a valid store URL"))
                 }
@@ -141,6 +170,7 @@ class SettingsViewModel(
                     siteUrl = normalizedSiteUrl,
                     consumerKey = state.consumerKey,
                     consumerSecret = state.consumerSecret,
+                    allowInsecureTls = state.allowInsecureTls,
                 )
             )
             _uiState.update {
@@ -159,7 +189,7 @@ class SettingsViewModel(
         val state = _uiState.value
         if (!state.canSave) return
         viewModelScope.launch {
-            val normalizedSiteUrl = normalizeHttpsSiteUrl(state.siteHost)
+            val normalizedSiteUrl = normalizeSiteUrl(state.siteUrlInput)
                 ?: return@launch _messages.send("Enter a valid store URL")
             _uiState.update { it.copy(isSaving = true) }
             repository.update(
@@ -167,6 +197,7 @@ class SettingsViewModel(
                     siteUrl = normalizedSiteUrl,
                     consumerKey = state.consumerKey,
                     consumerSecret = state.consumerSecret,
+                    allowInsecureTls = state.allowInsecureTls,
                 )
             )
             _uiState.update { it.copy(isSaving = false) }

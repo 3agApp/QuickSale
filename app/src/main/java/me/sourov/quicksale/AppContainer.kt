@@ -9,7 +9,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import me.sourov.quicksale.data.local.CartRepository
 import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.ProductRepository
@@ -80,6 +83,19 @@ class AppContainer(context: Context) {
     val syncMeta by lazy { SyncMetaRepository(dataStore) }
     val autoSync by lazy { AutoSyncRepository(dataStore) }
     val updatePreferences by lazy { AppUpdatePreferences(dataStore) }
+
+    init {
+        // Coil builds its client once and can't be handed the store settings per request, so the
+        // saved "allow insecure connection" choice is mirrored where the image stack can read it.
+        // A collector rather than a single read, so flipping the switch takes effect without a
+        // restart.
+        containerScope.launch {
+            settings.settings
+                .map { it.allowInsecureTls }
+                .distinctUntilChanged()
+                .collect { InsecureTls.allowed = it }
+        }
+    }
 }
 
 class QuickSaleApplication : Application(), ImageLoaderFactory {

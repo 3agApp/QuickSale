@@ -4,7 +4,7 @@ import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.sourov.quicksale.data.settings.StoreSettings
-import me.sourov.quicksale.data.settings.normalizeHttpsSiteUrl
+import me.sourov.quicksale.data.settings.normalizeSiteUrl
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -131,7 +131,7 @@ class WooHttp(private val settings: StoreSettings) {
         methodOverride: String?,
         useQueryAuth: Boolean,
     ): WooResponse {
-        val base = normalizeHttpsSiteUrl(settings.siteUrl)
+        val base = normalizeSiteUrl(settings.siteUrl)
             ?: throw WooApiException("quicksale_invalid_site_url", "Enter a valid store URL in Settings", 0)
 
         val parameters = buildMap {
@@ -150,9 +150,9 @@ class WooHttp(private val settings: StoreSettings) {
         var connection: HttpURLConnection? = null
         try {
             connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                // Before anything else: a store on an untrusted certificate fails the handshake
-                // here, and no header or timeout set below would ever reach the wire.
-                InsecureTls.applyTo(this)
+                // Before anything else: a store the operator has exempted would otherwise fail the
+                // handshake here, and no header or timeout set below would ever reach the wire.
+                if (settings.allowInsecureTls) InsecureTls.applyTo(this)
                 requestMethod = method
                 connectTimeout = TIMEOUT_MS
                 readTimeout = TIMEOUT_MS
