@@ -11,9 +11,12 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import me.sourov.quicksale.data.scanner.ScannerHub
 import me.sourov.quicksale.data.scanner.ScannerMode
+import me.sourov.quicksale.data.settings.DeviceModeState
 import me.sourov.quicksale.data.sync.AutoSyncScheduler
 import me.sourov.quicksale.ui.QuickSaleApp
 import me.sourov.quicksale.ui.theme.QuickSaleTheme
@@ -29,7 +32,26 @@ class MainActivity : ComponentActivity() {
     private val flushScan = Runnable { flushScanBuffer() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        /**
+         * Hold the splash until this device's saved mode has been read back.
+         *
+         * The first frame is otherwise drawn while the answer is still on disk, and since "not read
+         * yet" and "never answered" used to be the same value, a handheld configured weeks ago
+         * opened by asking what it was for — for as long as the read took, which on a cold start is
+         * long enough to tap. The splash is the right place to spend that time: it is already the
+         * screen that means "not ready".
+         */
+        var modeLoaded = false
+        installSplashScreen().setKeepOnScreenCondition { !modeLoaded }
+        lifecycleScope.launch {
+            // Bounded rather than trusted. A splash that never lifts is a device that never opens,
+            // and that is a worse failure than the flicker this exists to remove.
+            withTimeoutOrNull(SPLASH_WAIT_TIMEOUT_MS) {
+                appContainer.deviceModeState.first { it !is DeviceModeState.Loading }
+            }
+            modeLoaded = true
+        }
+
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
@@ -103,5 +125,10 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         mainHandler.removeCallbacks(flushScan)
         ScannerHub.unregister(this)
+    }
+
+    private companion object {
+        /** Longest the splash will wait on the stored device mode before giving up on it. */
+        const val SPLASH_WAIT_TIMEOUT_MS = 3_000L
     }
 }

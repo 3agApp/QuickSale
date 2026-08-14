@@ -45,6 +45,7 @@ import kotlinx.coroutines.launch
 import me.sourov.quicksale.appContainer
 import me.sourov.quicksale.data.scanner.ScannerHub
 import me.sourov.quicksale.data.settings.DeviceMode
+import me.sourov.quicksale.data.settings.DeviceModeState
 import me.sourov.quicksale.data.sync.SyncManager
 import me.sourov.quicksale.data.sync.SyncState
 import me.sourov.quicksale.data.sync.SyncTarget
@@ -69,16 +70,22 @@ fun QuickSaleApp() {
     val container = remember(context) { context.appContainer }
     val scope = rememberCoroutineScope()
 
-    // Null means the question has never been answered on this device, which is the whole of the
-    // first run: nothing else can be laid out until we know what this handheld is for.
-    val deviceMode by container.deviceMode.mode.collectAsStateWithLifecycle(initialValue = null)
+    // Three states, not two: the picker is a genuine first run, and it must never stand in for the
+    // moment before the saved answer has been read back. This is the same shared flow the splash
+    // waits on, so by the time this composes the answer is already in hand — and drawing nothing
+    // while it is Loading means a frame slipping out from under the splash is blank rather than a
+    // question this device answered weeks ago.
+    val deviceMode by container.deviceModeState.collectAsStateWithLifecycle()
 
-    when (val mode = deviceMode) {
-        null -> DeviceModeScreen(
+    when (val state = deviceMode) {
+        DeviceModeState.Loading -> Unit
+
+        DeviceModeState.Unset -> DeviceModeScreen(
             onSelect = { chosen -> scope.launch { container.deviceMode.update(chosen) } },
             modifier = Modifier.fillMaxSize(),
         )
-        else -> QuickSaleShell(mode = mode)
+
+        is DeviceModeState.Chosen -> QuickSaleShell(mode = state.mode)
     }
 }
 
