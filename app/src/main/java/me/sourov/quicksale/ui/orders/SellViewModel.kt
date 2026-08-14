@@ -37,6 +37,7 @@ import me.sourov.quicksale.data.settings.CheckoutConfig
 import me.sourov.quicksale.data.settings.CheckoutConfigRepository
 import me.sourov.quicksale.data.settings.OrderOutcome
 import me.sourov.quicksale.data.settings.PaymentGateway
+import me.sourov.quicksale.data.settings.BackorderRepository
 import me.sourov.quicksale.data.settings.SettingsRepository
 import me.sourov.quicksale.data.settings.ShippingOption
 import java.math.BigDecimal
@@ -47,6 +48,15 @@ data class CartLine(val product: Product, val quantity: Int) {
     /** Line subtotal as a [BigDecimal]; treats an unparsable price as zero. */
     val lineTotal: BigDecimal
         get() = (product.price.toBigDecimalOrNull() ?: BigDecimal.ZERO) * quantity.toBigDecimal()
+
+    /**
+     * How many units of this line the store hasn't got — 0 when it can supply the lot, and 0 for a
+     * product it doesn't count at all. This is the number the line warns with, so it is stated as
+     * the shortfall rather than the stock level: "2 more than the shop has" is what the operator
+     * has to tell the customer.
+     */
+    val beyondStock: Int
+        get() = product.availableStock?.let { (quantity - it).coerceAtLeast(0) } ?: 0
 
     /**
      * This line moved [steps] of the product's order step, snapped onto a quantity the store
@@ -129,7 +139,15 @@ class SellViewModel(
     private val settingsRepository: SettingsRepository,
     checkoutConfigRepository: CheckoutConfigRepository,
     addressFormRepository: AddressFormRepository,
+    backorderRepository: BackorderRepository,
 ) : ViewModel() {
+
+    /**
+     * Whether selling past the shop's count is permitted. Read as state rather than awaited per
+     * scan, because the guard sits in the middle of the fastest path in the app.
+     */
+    val allowBackorders: StateFlow<Boolean> = backorderRepository.allowed
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BackorderRepository.DEFAULT_ALLOWED)
 
     private val _customer = MutableStateFlow<Customer?>(null)
     val customer: StateFlow<Customer?> = _customer.asStateFlow()
@@ -266,23 +284,29 @@ class SellViewModel(
 
     private val buyer = combine(_customer, organization, member, _lines, ::Buyer)
 
+    /** How the order leaves — grouped for the same reason [Buyer] is: to keep the combine typed. */
+    private data class Dispatch(val deliveryEnabled: Boolean, val shipping: ShippingOption?)
+
+    private val dispatch = combine(_deliveryEnabled, _shippingChoice, ::Dispatch)
+
     /** Why the order can't be placed yet, or null when it can. */
     val blocker: StateFlow<PlaceBlocker?> = combine(
         buyer,
-        _deliveryEnabled,
-        _shippingChoice,
+        dispatch,
         missingAddressFields,
         addressFields,
-    ) { who, deliveryEnabled, shipping, missing, fields ->
+        allowBackorders,
+    ) { who, how, missing, fields, backordersAllowed ->
         placeBlocker(
             customer = who.customer,
             organization = who.organization,
             member = who.member,
             lines = who.lines,
-            deliveryEnabled = deliveryEnabled,
-            shipping = shipping,
+            deliveryEnabled = how.deliveryEnabled,
+            shipping = how.shipping,
             missingFields = missing,
             addressFieldCount = fields.size,
+            allowBackorders = backordersAllowed,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -423,29 +447,61 @@ class SellViewModel(
     fun setCouponCode(value: String) { _couponCode.value = value }
 
     /**
-     * Adds a product to the cart, or bumps its quantity if already present.
+     * Why [product] may not go up to [quantity], or null when it may.
+     *
+     * Only ever refuses when backorders are switched off — with them on, going past the shelf is
+     * the point, and the shortfall is reported rather than blocked. A product the store doesn't
+     * count has no ceiling to breach.
+     */
+    private fun stockRefusal(product: Product, quantity: Int): String? {
+        if (allowBackorders.value) return null
+        val available = product.availableStock ?: return null
+        if (quantity <= available) return null
+        return if (available == 0) {
+            "${product.name} is out of stock"
+        } else {
+            "Only $available of ${product.name} in stock"
+        }
+    }
+
+    /**
+     * Rings [product] up and returns what to tell the operator — added, added-but-short, or why not.
      *
      * A first scan rings up the product's pack size rather than a single unit, and a repeat scan
      * adds another case — so a product the store only sells in sixes never enters the order as a
      * quantity WooCommerce would refuse.
+     *
+     * Both callers route through here so the stock check can't be walked around by reaching the
+     * cart another way, and so "Added X" is written once rather than at every entrance.
      */
-    fun addProduct(product: Product) {
-        _lines.value = _lines.value.let { current ->
-            val index = current.indexOfFirst { it.product.id == product.id }
-            if (index >= 0) {
-                current.toMutableList().also { lines ->
-                    lines[index] = lines[index].stepped(+1)
-                }
-            } else {
-                current + CartLine(product, product.snapOrderQuantity(product.minOrderQuantity))
-            }
+    private fun ringUp(product: Product): String {
+        val current = _lines.value
+        val index = current.indexOfFirst { it.product.id == product.id }
+        val existing = current.getOrNull(index)
+
+        // Already in the cart means another case on the line; otherwise a new line at pack size.
+        val next = existing?.stepped(+1)
+            ?: CartLine(product, product.snapOrderQuantity(product.minOrderQuantity))
+
+        stockRefusal(product, next.quantity)?.let { return it }
+
+        _lines.value = if (existing != null) {
+            current.toMutableList().also { it[index] = next }
+        } else {
+            current + next
+        }
+
+        return if (next.beyondStock > 0) {
+            "Added ${product.name} — ${next.beyondStock} beyond stock"
+        } else {
+            "Added ${product.name}"
         }
     }
 
     fun addFromSearch(product: Product) {
-        addProduct(product)
+        val message = ringUp(product)
         _query.value = ""
-        _message.value = "Added ${product.name}"
+        _message.value = message
     }
 
     /** Handles the search field's "go" action (also how a typed/pasted barcode is submitted). */
@@ -516,14 +572,22 @@ class SellViewModel(
                 _message.value = "${product.name} is ${product.statusLabel} on the store, so it can't be ordered"
             }
             else -> {
-                addProduct(product)
+                val message = ringUp(product)
                 _query.value = ""
-                _message.value = "Added ${product.name}"
+                _message.value = message
             }
         }
     }
 
-    fun increment(productId: Long) = changeQuantity(productId, +1)
+    fun increment(productId: Long) {
+        val line = _lines.value.firstOrNull { it.product.id == productId } ?: return
+        stockRefusal(line.product, line.stepped(+1).quantity)?.let {
+            _message.value = it
+            return
+        }
+        changeQuantity(productId, +1)
+    }
+
     fun decrement(productId: Long) = changeQuantity(productId, -1)
 
     /**
@@ -644,8 +708,24 @@ class SellViewModel(
         shipping: ShippingOption?,
         missingFields: List<String>,
         addressFieldCount: Int,
+        allowBackorders: Boolean,
     ): PlaceBlocker? {
         if (lines.isEmpty()) return PlaceBlocker("Add at least one product", false)
+        // Checked here as well as at the scan, because a cart can outlast the setting: rung up
+        // while backorders were on, then still standing when someone turns them off.
+        if (!allowBackorders) {
+            lines.firstOrNull { it.beyondStock > 0 }?.let { short ->
+                val available = short.product.availableStock ?: 0
+                return PlaceBlocker(
+                    if (available == 0) {
+                        "${short.product.name} is out of stock"
+                    } else {
+                        "Only $available of ${short.product.name} in stock"
+                    },
+                    false,
+                )
+            }
+        }
         // No customer yet is the normal state of a cart being filled, not a fault. It stops the
         // order being placed and nothing else — the scanning half of the screen stays live.
         if (customer == null) return PlaceBlocker("Choose who this order is for", false)
@@ -758,6 +838,7 @@ class SellViewModel(
             settingsRepository: SettingsRepository,
             checkoutConfigRepository: CheckoutConfigRepository,
             addressFormRepository: AddressFormRepository,
+            backorderRepository: BackorderRepository,
         ) = viewModelFactory {
             initializer {
                 SellViewModel(
@@ -767,6 +848,7 @@ class SellViewModel(
                     settingsRepository = settingsRepository,
                     checkoutConfigRepository = checkoutConfigRepository,
                     addressFormRepository = addressFormRepository,
+                    backorderRepository = backorderRepository,
                 )
             }
         }

@@ -55,6 +55,25 @@ data class Product(
     /** True when the store has this product live — the only state the counter may sell in. */
     val isPublished: Boolean get() = status == STATUS_PUBLISHED
 
+    /**
+     * How many units the store can actually supply, or null when that has no number.
+     *
+     * Null is "sell as many as you like", and it covers the two ways a store says so: a product it
+     * doesn't count at all (`manage_stock` off, so [stockQuantity] is null), and one it marks
+     * `onbackorder`, which is the shop stating outright that this may be ordered past its count.
+     * Neither is a shortage, so neither should ever raise a warning.
+     *
+     * A count the store has already let run negative reads as 0 — there is no such thing as less
+     * than nothing on the shelf, and the operator only needs to know there is none.
+     */
+    val availableStock: Int?
+        get() = when {
+            stockStatus == STOCK_ON_BACKORDER -> null
+            stockQuantity != null -> stockQuantity.coerceAtLeast(0)
+            stockStatus == STOCK_OUT_OF_STOCK -> 0
+            else -> null
+        }
+
     /** How to name this product's state to whoever just scanned it. */
     val statusLabel: String
         get() = when (status) {
@@ -100,5 +119,11 @@ data class Product(
          * queries, which Room compiles as SQL and so cannot read a constant.
          */
         const val STATUS_PUBLISHED = "publish"
+
+        /** WooCommerce's `stock_status` for a product the shop has none of. */
+        const val STOCK_OUT_OF_STOCK = "outofstock"
+
+        /** WooCommerce's `stock_status` for one the shop will take orders on regardless. */
+        const val STOCK_ON_BACKORDER = "onbackorder"
     }
 }

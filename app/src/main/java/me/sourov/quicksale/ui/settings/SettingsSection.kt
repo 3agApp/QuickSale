@@ -1,6 +1,7 @@
 package me.sourov.quicksale.ui.settings
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.QrCode2
@@ -41,6 +42,11 @@ enum class SettingsSection(
         title = "Sync",
         subtitle = "Keep this device's copy of the store current",
         icon = Icons.Outlined.Sync,
+    ),
+    STOCK(
+        title = "Stock",
+        subtitle = "Whether the till can sell more than the shop has",
+        icon = Icons.Outlined.Inventory2,
     ),
     LABELS(
         title = "Label printing",

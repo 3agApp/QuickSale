@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
@@ -280,6 +281,24 @@ private fun CartLineRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (line.beyondStock > 0) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Outlined.Inventory2,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.width(Spacing.xs))
+                    Text(
+                        text = "${line.beyondStock} more than in stock",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
         FilledTonalIconButton(onClick = onDecrement) {
             Icon(

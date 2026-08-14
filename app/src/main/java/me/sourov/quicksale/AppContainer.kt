@@ -9,6 +9,7 @@ import me.sourov.quicksale.data.local.QuickSaleDatabase
 import me.sourov.quicksale.data.net.ConnectivityMonitor
 import me.sourov.quicksale.data.scanner.ScannerConfigRepository
 import me.sourov.quicksale.data.settings.AddressFormRepository
+import me.sourov.quicksale.data.settings.BackorderRepository
 import me.sourov.quicksale.data.settings.CheckoutConfigRepository
 import me.sourov.quicksale.data.settings.CurrencyRepository
 import me.sourov.quicksale.data.settings.DeviceModeRepository
@@ -45,6 +46,7 @@ class AppContainer(context: Context) {
     val labelSettings by lazy { LabelSettingsRepository(dataStore) }
     val scannerConfig by lazy { ScannerConfigRepository(dataStore) }
     val checkoutConfig by lazy { CheckoutConfigRepository(dataStore) }
+    val backorders by lazy { BackorderRepository(dataStore) }
     val addressForms by lazy { AddressFormRepository(dataStore) }
     val currency by lazy { CurrencyRepository(dataStore) }
     val syncMeta by lazy { SyncMetaRepository(dataStore) }
