@@ -201,6 +201,36 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun members_that_predate_the_name_columns_still_address_the_person() {
+        seedVersion4Database()
+
+        val database = openWithRoom()
+        try {
+            val dao = database.organizationDao()
+            runBlocking {
+                // A row as the snapshot wrote it before v14 asked the store for the names apart:
+                // the display name and nothing else.
+                dao.replaceAll(
+                    organizations = listOf(sampleOrganization),
+                    members = listOf(sampleMember.copy(firstName = "", lastName = "")),
+                    locations = emptyList(),
+                )
+
+                val member = dao.observeMember(organizationId = 12, userId = 45).first()
+                // The columns fill in on the next sync, not during the migration...
+                assertEquals("", member?.firstName)
+                assertEquals("", member?.lastName)
+                // ...so until then the display name is split, and no screen shows a blank where a
+                // person's name belongs.
+                assertEquals("Grace", member?.givenName)
+                assertEquals("Hopper", member?.familyName)
+            }
+        } finally {
+            database.close()
+        }
+    }
+
     /** Builds the database exactly as version 4 left it, including a row worth preserving. */
     private fun seedVersion4Database() {
         val file = context.getDatabasePath(databaseName)
@@ -245,6 +275,7 @@ class MigrationTest {
                 QuickSaleDatabase.MIGRATION_10_11,
                 QuickSaleDatabase.MIGRATION_11_13,
                 QuickSaleDatabase.MIGRATION_12_13,
+                QuickSaleDatabase.MIGRATION_13_14,
             )
             .build()
 
@@ -267,6 +298,8 @@ class MigrationTest {
         organizationId = 12,
         userId = 45,
         name = "Grace Hopper",
+        firstName = "Grace",
+        lastName = "Hopper",
         email = "grace@acme.example",
         role = "admin",
         status = "active",

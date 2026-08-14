@@ -19,7 +19,7 @@ import me.sourov.quicksale.BuildConfig
         CartCustomerRecord::class,
     ],
     // 12 is skipped deliberately — see MIGRATION_12_13.
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 abstract class QuickSaleDatabase : RoomDatabase() {
@@ -43,7 +43,7 @@ abstract class QuickSaleDatabase : RoomDatabase() {
                 .addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
                     MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
-                    MIGRATION_11_13, MIGRATION_12_13,
+                    MIGRATION_11_13, MIGRATION_12_13, MIGRATION_13_14,
                 )
                 .build()
 
@@ -204,6 +204,22 @@ abstract class QuickSaleDatabase : RoomDatabase() {
             db.execSQL("DROP TABLE IF EXISTS outbox")
         }
 
+        /**
+         * v14 stores a member's first and last name beside their display name.
+         *
+         * The store has always held the three separately and now lets the app edit them, so the
+         * edit form needs the two it writes rather than a guess split out of the display name.
+         * Existing rows get blanks and fill in on the next sync; nothing is shown from them until
+         * then, because every screen prints the display name.
+         */
+        @VisibleForTesting
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE org_members ADD COLUMN firstName TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE org_members ADD COLUMN lastName TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         /** As Room generates them for a fresh install — see [ORGANIZATION_SCHEMA] on why verbatim. */
         private val CART_SCHEMA = listOf(
             "CREATE TABLE IF NOT EXISTS `cart_lines` (`productId` INTEGER NOT NULL, `quantity` INTEGER NOT NULL, `addedAtMillis` INTEGER NOT NULL, PRIMARY KEY(`productId`))",
@@ -217,6 +233,11 @@ abstract class QuickSaleDatabase : RoomDatabase() {
          * Keeping them identical rather than hand-equivalent matters: Room validates the schema
          * every time it opens the database, and an upgraded install that differs from a fresh one
          * in any detail crashes on launch for exactly the users who already had the app.
+         *
+         * "Fresh install" means one at v5, where this migration runs — these are the tables as they
+         * were then, and they stay that way. `org_members` is missing the names v14 added on
+         * purpose: a v4 database climbs through every later migration afterwards, and adding the
+         * columns here would leave [MIGRATION_13_14] adding them a second time.
          */
         private val ORGANIZATION_SCHEMA = listOf(
             "CREATE TABLE IF NOT EXISTS `organizations` (`id` INTEGER NOT NULL, `name` TEXT NOT NULL, `status` TEXT NOT NULL, `allowCustomShipping` INTEGER NOT NULL, `billingJson` TEXT NOT NULL, `billingFormatted` TEXT NOT NULL, `email` TEXT NOT NULL, `phone` TEXT NOT NULL, `city` TEXT NOT NULL, `country` TEXT NOT NULL, `dateModifiedGmt` TEXT NOT NULL, PRIMARY KEY(`id`))",
@@ -303,9 +324,11 @@ abstract class QuickSaleDatabase : RoomDatabase() {
             memberId: Long, organizationId: Long, userId: Long, name: String, email: String,
             role: String, status: String, canPlaceOrders: Boolean, locationAccess: String,
         ): String =
-            "INSERT INTO org_members (memberId, organizationId, userId, name, email, role, status, " +
-                "canPlaceOrders, locationAccess) VALUES " +
-                "($memberId, $organizationId, $userId, '$name', '$email', '$role', '$status', " +
+            "INSERT INTO org_members (memberId, organizationId, userId, name, firstName, lastName, " +
+                "email, role, status, canPlaceOrders, locationAccess) VALUES " +
+                "($memberId, $organizationId, $userId, '$name', " +
+                "'${name.substringBefore(' ')}', '${name.substringAfter(' ', "")}', " +
+                "'$email', '$role', '$status', " +
                 "${canPlaceOrders.asSqlBoolean()}, '$locationAccess')"
 
         private fun sampleLocation(

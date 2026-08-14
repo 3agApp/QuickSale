@@ -355,7 +355,7 @@ private fun PlaceOrderBar(
                 Icon(Icons.Filled.PointOfSale, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(Spacing.sm))
                 Text(
-                    text = "Start an order for ${member.firstName.ifBlank { "this customer" }}",
+                    text = "Start an order for ${member.givenName.ifBlank { "this customer" }}",
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

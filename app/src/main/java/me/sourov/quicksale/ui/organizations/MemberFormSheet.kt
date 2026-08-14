@@ -120,41 +120,48 @@ fun MemberFormSheet(
                     ?: "They get a login and can order for this company",
             )
 
-            if (!viewModel.isEditing) {
-                Spacer(Modifier.height(Spacing.lg))
-                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                    OutlinedTextField(
-                        value = firstName,
-                        onValueChange = viewModel::setFirstName,
-                        label = { Text("First name *") },
-                        supportingText = fieldErrors["first_name"]?.let { { Text(it) } },
-                        isError = fieldErrors["first_name"] != null,
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedTextField(
-                        value = lastName,
-                        onValueChange = viewModel::setLastName,
-                        label = { Text("Last name") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-
-                Spacer(Modifier.height(Spacing.sm))
+            // Offered when editing too: these live on the person's website account rather than on
+            // the membership, but the store writes both from one call, so a misspelled surname or
+            // a typo'd address is fixed here rather than in wp-admin.
+            Spacer(Modifier.height(Spacing.lg))
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 OutlinedTextField(
-                    value = email,
-                    onValueChange = viewModel::setEmail,
-                    label = { Text("Email *") },
-                    supportingText = {
-                        Text(fieldErrors["email"] ?: "Becomes their login on the website")
-                    },
-                    isError = fieldErrors["email"] != null,
+                    value = firstName,
+                    onValueChange = viewModel::setFirstName,
+                    label = { Text("First name *") },
+                    supportingText = fieldErrors["first_name"]?.let { { Text(it) } },
+                    isError = fieldErrors["first_name"] != null,
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    value = lastName,
+                    onValueChange = viewModel::setLastName,
+                    label = { Text("Last name") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
                 )
             }
+
+            Spacer(Modifier.height(Spacing.sm))
+            OutlinedTextField(
+                value = email,
+                onValueChange = viewModel::setEmail,
+                label = { Text("Email *") },
+                supportingText = {
+                    Text(
+                        fieldErrors["email"] ?: if (viewModel.isEditing) {
+                            "How they sign in on the website — changing it tells the old address"
+                        } else {
+                            "Becomes their login on the website"
+                        }
+                    )
+                },
+                isError = fieldErrors["email"] != null,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                modifier = Modifier.fillMaxWidth(),
+            )
 
             Spacer(Modifier.height(Spacing.md))
             ToggleRow(

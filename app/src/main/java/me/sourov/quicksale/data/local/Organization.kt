@@ -75,7 +75,19 @@ data class Member(
     @PrimaryKey val memberId: Long,
     val organizationId: Long,
     val userId: Long,
+    /** The display name, as the shop prints it. Show this. */
     val name: String,
+    /**
+     * The given name behind [name], as stored on the WordPress account.
+     *
+     * Kept alongside the display name because it is the field an edit sends, and [name] cannot
+     * stand in for it: splitting on the first space gets "Anna Maria" and "van der Berg" wrong, and
+     * an edit form that silently reshaped somebody's name would be worse than not offering one.
+     * Blank on rows last synced before the store began sending it.
+     */
+    val firstName: String = "",
+    /** The surname on the WordPress account. Blank on rows synced before the store sent it. */
+    val lastName: String = "",
     val email: String,
     /** The *organization* role — `admin` or `member` — not a WordPress role. */
     val role: String,
@@ -94,8 +106,20 @@ data class Member(
 ) {
     val isAdmin: Boolean get() = role.equals("admin", ignoreCase = true)
 
-    /** Just the given name, for addressing this person in a button or a sentence. */
-    val firstName: String get() = name.trim().substringBefore(' ')
+    /**
+     * Just the given name, for addressing this person in a button or a sentence.
+     *
+     * Prefers the stored [firstName] and falls back to the display name's first word, which is all
+     * a row synced before the store sent the field has.
+     */
+    val givenName: String get() = firstName.ifBlank { name.trim().substringBefore(' ') }
+
+    /**
+     * The surname, for filling an edit form. Same fallback as [givenName], and safe for the same
+     * reason: a split that reads "Anna Maria Schmidt" wrong is only ever shown, never sent — an
+     * edit sends the fields the operator actually changed.
+     */
+    val familyName: String get() = lastName.ifBlank { name.trim().substringAfter(' ', "").trim() }
 
     /**
      * What this person may do *on their own account*, named so it can't be read as anything larger.

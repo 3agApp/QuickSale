@@ -19,13 +19,16 @@ import me.sourov.quicksale.data.remote.WooApiException
 import me.sourov.quicksale.data.settings.SettingsRepository
 
 /**
- * Adding somebody to a company, or changing what an existing person may do.
+ * Adding somebody to a company, or changing who an existing person is and what they may do.
  *
- * The two halves are deliberately different shapes. **Adding** needs a name and an email, because
- * the store creates a real login from them. **Editing** never touches either: a person's name and
- * email belong to their WordPress account, not to this membership, and the plugin's member route
- * would not accept them anyway. What editing changes is the membership — their role, whether they
- * are switched on, and which locations they may send an order to.
+ * Both halves ask for a name and an email. **Adding** turns them into a real login. **Editing**
+ * writes them to the WordPress account behind the membership: they are not membership fields at
+ * all, but the plugin's member route writes both sides in one call, so the sheet can offer them
+ * next to the role and the switch rather than sending the operator to wp-admin to fix a surname.
+ *
+ * An edit sends only what was actually typed over. Re-sending an unchanged address would ask the
+ * store to move somebody onto an address that already has an account — their own — and re-sending
+ * an unchanged name is a write that mails the member for nothing.
  */
 class MemberFormViewModel(
     private val organizationId: Long,
@@ -42,13 +45,16 @@ class MemberFormViewModel(
         organizationRepository.locations(organizationId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val _firstName = MutableStateFlow("")
+    // Prefilled when editing, so the fields read as the person's current details rather than as a
+    // form to re-type. A row synced before the store sent the names apart has only the display
+    // name, and [Member.givenName] splits that rather than showing nothing.
+    private val _firstName = MutableStateFlow(existing?.givenName.orEmpty())
     val firstName: StateFlow<String> = _firstName.asStateFlow()
 
-    private val _lastName = MutableStateFlow("")
+    private val _lastName = MutableStateFlow(existing?.familyName.orEmpty())
     val lastName: StateFlow<String> = _lastName.asStateFlow()
 
-    private val _email = MutableStateFlow("")
+    private val _email = MutableStateFlow(existing?.email.orEmpty())
     val email: StateFlow<String> = _email.asStateFlow()
 
     private val _isAdmin = MutableStateFlow(existing?.isAdmin ?: false)
@@ -158,6 +164,22 @@ class MemberFormViewModel(
     }
 
     private fun update(member: Member) {
+        val first = _firstName.value.trim()
+        val last = _lastName.value.trim()
+        val mail = _email.value.trim()
+        val problems = buildMap {
+            if (first.isBlank()) put("first_name", "A first name is required")
+            if (mail.isBlank()) {
+                put("email", "An email is required — it's how they sign in")
+            } else if (!mail.contains('@')) {
+                put("email", "That doesn't look like an email address")
+            }
+        }
+        if (problems.isNotEmpty()) {
+            _fieldErrors.value = _fieldErrors.value + problems
+            return
+        }
+
         _saving.value = true
         viewModelScope.launch {
             runWrite {
@@ -165,6 +187,12 @@ class MemberFormViewModel(
                 val updated = WoapApi(it).updateMember(
                     organizationId = organizationId,
                     memberId = member.memberId,
+                    // Only what changed. An unchanged address re-sent is the store being asked to
+                    // move somebody onto an account that already exists — their own — and an
+                    // unchanged name is a write to their account for nothing.
+                    firstName = first.takeIf { value -> value != member.givenName },
+                    lastName = last.takeIf { value -> value != member.familyName },
+                    email = mail.takeIf { value -> !value.equals(member.email, ignoreCase = true) },
                     role = if (_isAdmin.value) ROLE_ADMIN else ROLE_MEMBER,
                     status = if (_isActive.value) Member.STATUS_ACTIVE else STATUS_INACTIVE,
                     // An empty chosen set is not a restriction the store can store — in its

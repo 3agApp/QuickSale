@@ -194,13 +194,20 @@ class WoapApi(settings: StoreSettings) {
     }
 
     /**
-     * Edits one membership: what they may do, whether they are switched on, and where they may
-     * send an order.
+     * Edits one membership: who the person is, what they may do, whether they are switched on, and
+     * where they may send an order.
      *
      * Every field is optional and only what is supplied is sent, because this route merges. In
      * particular `capabilities` is never sent: permissions are stored as a diff against the role,
      * so echoing back a map read under the old role would pin the member to permissions their new
      * role has moved away from.
+     *
+     * [firstName], [lastName] and [email] belong to the WordPress account behind the membership,
+     * and the route writes them there — the plugin edits a person and their membership through the
+     * one call. Sending an [email] that already has an account of its own is refused rather than
+     * merged (`409 woap_rest_email_taken`, or `woap_rest_already_member` when that account buys for
+     * another company), and a refusal writes nothing at all. Send [lastName] as `""` to blank it;
+     * null leaves it alone.
      *
      * [locationAccess] is null for "leave alone", [Member.LOCATION_ACCESS_ALL] for unrestricted, or
      * the IDs they are limited to.
@@ -208,12 +215,18 @@ class WoapApi(settings: StoreSettings) {
     suspend fun updateMember(
         organizationId: Long,
         memberId: Long,
+        firstName: String? = null,
+        lastName: String? = null,
+        email: String? = null,
         role: String? = null,
         status: String? = null,
         locationAccess: Set<Long>? = null,
         unrestrictedLocations: Boolean = false,
     ): Member {
         val body = JSONObject().apply {
+            firstName?.let { put("first_name", it) }
+            lastName?.let { put("last_name", it) }
+            email?.let { put("email", it) }
             role?.let { put("role", it) }
             status?.let { put("status", it) }
             when {
@@ -373,6 +386,8 @@ class WoapApi(settings: StoreSettings) {
         organizationId = organizationId,
         userId = optLong("user_id"),
         name = optString("name").decodeHtmlEntities(),
+        firstName = optString("first_name").decodeHtmlEntities(),
+        lastName = optString("last_name").decodeHtmlEntities(),
         email = optString("email"),
         role = optString("role"),
         status = optString("status"),
