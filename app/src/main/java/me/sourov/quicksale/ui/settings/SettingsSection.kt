@@ -1,6 +1,7 @@
 package me.sourov.quicksale.ui.settings
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.PhoneAndroid
@@ -42,6 +43,16 @@ enum class SettingsSection(
         title = "Sync",
         subtitle = "Keep this device's copy of the store current",
         icon = Icons.Outlined.Sync,
+    ),
+
+    /**
+     * Below [SYNC] because it is the rarer errand and the further-away machine: this refreshes the
+     * *website* from Kontor, and a till that only ever taps Sync is still doing the right thing.
+     */
+    KONTOR(
+        title = "Kontor sync",
+        subtitle = "Refresh the website's products and stock from Kontor",
+        icon = Icons.Outlined.CloudSync,
     ),
     STOCK(
         title = "Stock",

@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Business
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Warehouse
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButtonDefaults
@@ -31,6 +33,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.sourov.quicksale.data.sync.SyncState
 import me.sourov.quicksale.data.sync.SyncTarget
+import me.sourov.quicksale.data.sync.WebsiteJob
+import me.sourov.quicksale.data.sync.WebsiteSyncState
+import me.sourov.quicksale.data.sync.parseGmt
 import me.sourov.quicksale.ui.theme.Sizes
 import me.sourov.quicksale.ui.theme.Spacing
 
@@ -39,6 +44,13 @@ val SyncTarget.icon: ImageVector
     get() = when (this) {
         SyncTarget.Products -> Icons.Filled.Inventory2
         SyncTarget.Organizations -> Icons.Filled.Business
+    }
+
+/** Website jobs get their own icons — they sit next to the device rows and must not read as those. */
+val WebsiteJob.icon: ImageVector
+    get() = when (this) {
+        WebsiteJob.Stock -> Icons.Filled.Warehouse
+        WebsiteJob.Products -> Icons.Filled.CloudSync
     }
 
 /**
@@ -96,6 +108,121 @@ fun SyncTargetRow(
             }
         }
     }
+}
+
+/**
+ * One website job's row: what the store last did, and a button to make it do it again.
+ *
+ * Shaped like [SyncTargetRow] because it is the same gesture one hop further up — but the website
+ * often can't say how far along a run is, so the bar here goes indeterminate rather than sitting
+ * at whatever number it last managed to report.
+ */
+@Composable
+fun WebsiteJobRow(
+    job: WebsiteJob,
+    state: WebsiteSyncState,
+    onRun: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val running = state.isRunning
+    Column(modifier = modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(icon = job.icon, size = Sizes.avatarSmall)
+            Spacer(Modifier.width(Spacing.md))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = job.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                WebsiteJobStatusText(job = job, state = state)
+            }
+            Spacer(Modifier.width(Spacing.sm))
+            FilledTonalIconButton(
+                onClick = onRun,
+                enabled = !running,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(),
+            ) {
+                SpinningSyncIcon(
+                    syncing = running,
+                    contentDescription = "Run ${job.label} sync on the website",
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = running,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            Column {
+                Spacer(Modifier.height(Spacing.md))
+                val fraction = (state as? WebsiteSyncState.Running)?.fraction
+                if (fraction == null) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                } else {
+                    LinearProgressIndicator(
+                        progress = { fraction.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The line under a website job's name.
+ *
+ * A finished run gets the store's own summary — "2805 products updated, 140 article numbers had
+ * no matching SKU" says more than any count this app could assemble, and it is already in the
+ * shop's language.
+ */
+@Composable
+private fun WebsiteJobStatusText(job: WebsiteJob, state: WebsiteSyncState) {
+    val (text, color) = when (state) {
+        is WebsiteSyncState.Running -> state.message to MaterialTheme.colorScheme.onSurfaceVariant
+        is WebsiteSyncState.Error -> state.message to MaterialTheme.colorScheme.error
+        is WebsiteSyncState.Done -> {
+            val summary = state.progress.message.ifBlank {
+                if (state.progress.failed) "The run failed" else "Done"
+            }
+            "${lastRunLabel(parseGmt(state.progress.finishedGmt))} · $summary" to
+                if (state.progress.failed) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+        }
+
+        WebsiteSyncState.Idle -> job.blurb to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = color,
+        // Three, because this is the store's own account of what it did — "4150 updated, passed
+        // over 234 with no image" is the whole value of the row, and two lines cut it mid-sentence.
+        maxLines = 3,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/**
+ * When the *website* last ran a job.
+ *
+ * Separate wording from [lastSyncLabel] because these rows describe work this device didn't do:
+ * "synced 42 minutes ago" next to a till's own sync row reads as a second claim about the till.
+ */
+fun lastRunLabel(millis: Long): String {
+    if (millis <= 0L) return "never run"
+    val relative = DateUtils.getRelativeTimeSpanString(
+        millis,
+        System.currentTimeMillis(),
+        DateUtils.MINUTE_IN_MILLIS,
+    )
+    return "ran $relative"
 }
 
 /** The one-line status under a target's name: what it's doing, or what it holds. */

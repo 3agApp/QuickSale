@@ -43,7 +43,10 @@ class ConnectionTester {
 
         try {
             http.get("wc-woap/v1/organizations", mapOf("per_page" to "1"))
-            ConnectionResult.Success("Connected — WooCommerce and organization accounts both responded")
+            ConnectionResult.Success(
+                "Connected — WooCommerce and organization accounts both responded. " +
+                    kontorSyncNote(http)
+            )
         } catch (e: WooApiException) {
             ConnectionResult.Partial(
                 when (e.status) {
@@ -61,6 +64,27 @@ class ConnectionTester {
                 "WooCommerce is connected, but organizations couldn't be reached: ${e.message}"
             )
         }
+    }
+
+    /**
+     * Whether this store can be told to pull from Kontor, said in one clause.
+     *
+     * Strictly informational, and deliberately not a third leg of the [ConnectionResult.Partial]
+     * verdict: most stores have no Kontor sync plugin and are entirely healthy without one.
+     * Reporting its absence as a problem would send someone hunting for a plugin they never
+     * wanted, on a connection that is working.
+     */
+    private suspend fun kontorSyncNote(http: WooHttp): String = try {
+        http.get("wc-wksync/v1/jobs")
+        "Kontor sync is available."
+    } catch (e: WooApiException) {
+        when (e.status) {
+            404 -> "Kontor sync isn't installed on this store."
+            401, 403 -> "Kontor sync is installed, but these keys can't reach it."
+            else -> "Kontor sync didn't respond: ${e.message}"
+        }
+    } catch (_: Exception) {
+        "Kontor sync couldn't be checked."
     }
 
     /**

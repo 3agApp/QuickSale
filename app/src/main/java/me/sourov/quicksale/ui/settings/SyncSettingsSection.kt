@@ -49,6 +49,11 @@ import me.sourov.quicksale.ui.theme.Spacing
 /**
  * Sync, in Settings: run it now, and decide how often it should run itself.
  *
+ * Strictly one hop — the website onto this device. Pulling the *website* from Kontor lives on its
+ * own page ([KontorSettingsSection]) and is never folded into these buttons: they are different
+ * jobs on different machines with different failure modes, and a single control that quietly did
+ * both would leave the counter unable to say which half went wrong.
+ *
  * Automatic sync is cheap by design — every page of the organization snapshot carries an ETag, so
  * a poll against an unchanged store transfers nothing and rewrites nothing.
  */

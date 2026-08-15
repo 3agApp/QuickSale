@@ -50,6 +50,8 @@ fun SettingsSectionScreen(
 
             SettingsSection.SYNC -> SyncSettingsSection()
 
+            SettingsSection.KONTOR -> KontorSettingsSection()
+
             SettingsSection.STOCK -> StockSettingsSection()
 
             SettingsSection.LABELS -> LabelSettingsSection(

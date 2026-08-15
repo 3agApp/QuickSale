@@ -7,7 +7,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,7 +29,6 @@ import me.sourov.quicksale.data.settings.CurrencyRepository
 import me.sourov.quicksale.data.settings.SettingsRepository
 import me.sourov.quicksale.data.settings.StoreSettings
 import me.sourov.quicksale.data.settings.settingsDataStore
-import java.io.IOException
 
 /**
  * Runs synchronisation in an app-wide scope so it survives navigation.
@@ -256,26 +254,4 @@ object SyncManager {
         )
     }
 
-    /**
-     * Retries a single page fetch on a transient network error ([IOException]) with a short
-     * exponential backoff. HTTP/auth failures surface as
-     * [me.sourov.quicksale.data.remote.WooApiException] and are NOT retried — a wrong key or a
-     * missing plugin should fail fast rather than spin.
-     */
-    private suspend fun <T> retryOnNetworkBlip(
-        attempts: Int = 3,
-        initialDelayMs: Long = 700L,
-        block: suspend () -> T,
-    ): T {
-        var delayMs = initialDelayMs
-        repeat(attempts - 1) {
-            try {
-                return block()
-            } catch (_: IOException) {
-                delay(delayMs)
-                delayMs *= 2
-            }
-        }
-        return block() // last attempt: let the exception propagate
-    }
 }
