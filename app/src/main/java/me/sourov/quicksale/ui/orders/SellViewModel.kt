@@ -28,6 +28,7 @@ import me.sourov.quicksale.data.local.Organization
 import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.ProductRepository
+import me.sourov.quicksale.data.local.stepPackSize
 import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.data.scanner.ScannerHub
 import me.sourov.quicksale.data.settings.AddressField
@@ -71,7 +72,22 @@ data class CartLine(val product: Product, val quantity: Int) {
      * actually sells. A result of 0 means the line has fallen below the product's pack size.
      */
     fun stepped(steps: Int): CartLine =
-        copy(quantity = product.snapOrderQuantity(quantity + steps * product.orderQuantityStep.coerceAtLeast(1)))
+        copy(quantity = stepPackSize(quantity, steps, product.packSize, product.quantityStep))
+
+    companion object {
+        /**
+         * A line read back from the saved cart, measured against the catalog as it stands now.
+         *
+         * The quantity on disk was legal when it was scanned, but the store may have introduced or
+         * raised a pack size while the cart sat there — and an order placed off the lattice is
+         * refused at the very end, after the customer has been told a price. So the stored quantity
+         * is snapped like any other, and a line that no longer reaches a single pack comes back *at*
+         * the pack size rather than disappearing: the operator scanned that product, and a line
+         * they can see and correct beats a line silently missing from the order they place.
+         */
+        fun restored(product: Product, storedQuantity: Int): CartLine =
+            CartLine(product, product.snapOrderQuantity(storedQuantity).takeIf { it > 0 } ?: product.packSize)
+    }
 }
 
 /**
@@ -340,8 +356,8 @@ class SellViewModel(
 
     init {
         // Bring back whatever was in the cart when the app was last killed, before anything else
-        // touches it. Quantities are restored as stored; everything else about each product comes
-        // from the catalog as it is now.
+        // touches it. Everything about each product — its price, its pack size, and so the quantity
+        // that line is allowed to hold — comes from the catalog as it is now, not as it was.
         viewModelScope.launch {
             val (storedLines, storedCustomer) = cartRepository.load()
             if (storedLines.isNotEmpty() || storedCustomer != null) {
@@ -349,7 +365,7 @@ class SellViewModel(
                     // A product deleted from the store since the scan simply drops out of the
                     // cart — it can no longer be ordered, and carrying it would only fail at
                     // Place order.
-                    productRepository.byId(record.productId)?.let { CartLine(it, record.quantity) }
+                    productRepository.byId(record.productId)?.let { CartLine.restored(it, record.quantity) }
                 }
                 // Only fill an untouched cart: the operator may have scanned something in the
                 // moment between the screen appearing and this read returning, and that scan is
@@ -488,8 +504,7 @@ class SellViewModel(
         val existing = current.getOrNull(index)
 
         // Already in the cart means another case on the line; otherwise a new line at pack size.
-        val next = existing?.stepped(+1)
-            ?: CartLine(product, product.snapOrderQuantity(product.minOrderQuantity))
+        val next = existing?.stepped(+1) ?: CartLine(product, product.packSize)
 
         stockRefusal(product, next.quantity)?.let { return it }
 

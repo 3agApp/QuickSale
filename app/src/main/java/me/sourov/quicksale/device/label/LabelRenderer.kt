@@ -133,9 +133,9 @@ class LabelRenderer {
         val skuLine = product.sku.trim().takeIf { settings.showSku && it.isNotBlank() }
         // The pack size the product is sold in, under the SKU it belongs to. Unlike the prices this
         // line always has a value — a product with no minimum is sold in ones — so it always prints.
-        val packSizeLine = product.minOrderQuantity
+        val packSizeLine = product.packSize
             .takeIf { settings.showPackSize }
-            ?.let { "$PACK_SIZE_PREFIX ${it.coerceAtLeast(1)}" }
+            ?.let { "$PACK_SIZE_PREFIX $it" }
         // Only stores running an MSRP plugin carry one; everywhere else this line is simply absent.
         val msrpLine = product.msrp.trim()
             .takeIf { settings.showMsrp && it.isNotBlank() }

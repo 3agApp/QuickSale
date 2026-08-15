@@ -177,7 +177,7 @@ fun ProductDetailScreen(
 
             // Only worth a row when the store actually restricts the quantity — every other product
             // is simply sold one at a time, which is what an absent row says.
-            if (current.minOrderQuantity > 1 || current.orderQuantityStep > 1) {
+            if (current.packSize > 1 || current.quantityStep > 1) {
                 Spacer(Modifier.height(Spacing.xs))
                 DetailRow(label = "Pack (VE)", value = packSizeSummary(current))
             }
@@ -405,8 +405,8 @@ private fun StepperRow(
  * quantity it will take, and how quantities grow above it when the two differ.
  */
 private fun packSizeSummary(product: Product): String {
-    val min = product.minOrderQuantity.coerceAtLeast(1)
-    val step = product.orderQuantityStep.coerceAtLeast(1)
+    val min = product.packSize
+    val step = product.quantityStep
     return if (step == min) "$min" else "$min, then +$step"
 }
 

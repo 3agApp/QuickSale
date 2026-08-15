@@ -97,21 +97,28 @@ data class Product(
         get() = categories.split(",").map { it.trim() }.filter { it.isNotBlank() }
 
     /**
+     * The smallest quantity the store will sell this product in — [minOrderQuantity] as everything
+     * downstream must read it, with a missing rule or a store's leftover zero read as one unit.
+     *
+     * Every quantity decision goes through this rather than the raw column, so a zero can't reach
+     * the counter as "a pack of none".
+     */
+    val packSize: Int get() = minOrderQuantity.coerceAtLeast(1)
+
+    /** How quantities grow above [packSize], with a missing or zero step read as one unit. */
+    val quantityStep: Int get() = orderQuantityStep.coerceAtLeast(1)
+
+    /**
      * The largest quantity the store will actually sell at or below [desired], or 0 when [desired]
      * falls short of the pack size (i.e. the line should go away rather than round up to a
      * quantity nobody asked for).
      *
-     * Every orderable quantity is `minOrderQuantity + n × orderQuantityStep`, so this is what turns
-     * a raw +1/−1 intent into a number WooCommerce will accept. Rounding *down* is deliberate: the
-     * operator taps − to sell less, and snapping upward would make the button do the opposite of
-     * what it says.
+     * Every orderable quantity is `packSize + n × quantityStep`, so this is what turns a raw +1/−1
+     * intent into a number WooCommerce will accept. Rounding *down* is deliberate: the operator
+     * taps − to sell less, and snapping upward would make the button do the opposite of what it
+     * says.
      */
-    fun snapOrderQuantity(desired: Int): Int {
-        val min = minOrderQuantity.coerceAtLeast(1)
-        val step = orderQuantityStep.coerceAtLeast(1)
-        if (desired < min) return 0
-        return min + ((desired - min) / step) * step
-    }
+    fun snapOrderQuantity(desired: Int): Int = snapToPackSize(desired, packSize, quantityStep)
 
     companion object {
         /**
@@ -126,4 +133,37 @@ data class Product(
         /** WooCommerce's `stock_status` for one the shop will take orders on regardless. */
         const val STOCK_ON_BACKORDER = "onbackorder"
     }
+}
+
+/**
+ * The largest quantity a store selling in [packSize]s of [step] will take at or below [desired],
+ * or 0 when [desired] falls short of a single pack.
+ *
+ * Lives outside [Product] because a line being edited on a *placed* order carries the two numbers
+ * without carrying the product they came from — and the two screens must snap identically, or the
+ * order the counter can build is not the order it can then correct. Both arguments are the already
+ * coerced [Product.packSize] / [Product.quantityStep], never the raw columns.
+ */
+fun snapToPackSize(desired: Int, packSize: Int, step: Int): Int {
+    val pack = packSize.coerceAtLeast(1)
+    val by = step.coerceAtLeast(1)
+    if (desired < pack) return 0
+    return pack + ((desired - pack) / by) * by
+}
+
+/**
+ * [quantity] moved [steps] cases of [step], landing on a quantity a store selling in [packSize]s
+ * will take. 0 means the line has dropped below a single pack and belongs off the order.
+ *
+ * A quantity that was never on the lattice — a line billed before the store had a pack size at all
+ * — comes *down onto* it rather than straight through it: − on 7 of a six-pack means 6, not "off
+ * the order". On every quantity the app itself produced this is plain arithmetic.
+ */
+fun stepPackSize(quantity: Int, steps: Int, packSize: Int, step: Int): Int {
+    val by = step.coerceAtLeast(1)
+    val onLattice = snapToPackSize(quantity, packSize, by)
+    if (steps < 0 && onLattice < quantity) {
+        return snapToPackSize(onLattice + (steps + 1) * by, packSize, by)
+    }
+    return snapToPackSize(quantity + steps * by, packSize, by)
 }

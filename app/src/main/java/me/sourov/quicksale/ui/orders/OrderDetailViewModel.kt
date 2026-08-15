@@ -18,6 +18,7 @@ import me.sourov.quicksale.data.local.Member
 import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.ProductRepository
+import me.sourov.quicksale.data.local.stepPackSize
 import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.data.scanner.ScannerHub
 import me.sourov.quicksale.data.settings.SettingsRepository
@@ -40,10 +41,26 @@ data class EditableLine(
     val sku: String,
     val unitPrice: String,
     val quantity: Int,
+    /**
+     * The product's pack size and case step, copied off the catalog when the line is built — an
+     * order's own line items carry neither, and a line that doesn't know them steps the order onto
+     * quantities the store won't sell. Both default to 1, which is what a product the catalog no
+     * longer holds has to be treated as: one unit, one at a time.
+     */
+    val packSize: Int = 1,
+    val quantityStep: Int = 1,
 ) {
     /** Line subtotal as a [BigDecimal]; treats an unparsable price as zero. */
     val lineTotal: BigDecimal
         get() = (unitPrice.toBigDecimalOrNull() ?: BigDecimal.ZERO) * quantity.toBigDecimal()
+
+    /**
+     * This line moved [steps] of its case step, snapped onto a quantity the store actually sells —
+     * the same arithmetic the till uses. A result of 0 means the line has dropped below one pack,
+     * and the caller takes it off the order.
+     */
+    fun stepped(steps: Int): EditableLine =
+        copy(quantity = stepPackSize(quantity, steps, packSize, quantityStep))
 }
 
 /**
@@ -51,10 +68,13 @@ data class EditableLine(
  * [WooCommerceApi.OrderDetail.isEditable] — a working copy of its line items that can be changed
  * and saved back.
  *
- * Editing a placed order is a smaller, blunter tool than building one: there's no pack-size
- * stepping or delivery/payment re-negotiation here, just add, remove, and change quantity on
- * whatever WooCommerce already billed. The store recalculates totals and stock the same way it
- * does for any other order edit — this view model only ever sends what changed.
+ * Editing a placed order is a smaller tool than building one: no delivery or payment
+ * re-negotiation here, just add, remove, and change quantity on whatever WooCommerce already
+ * billed. Quantities move in the product's own pack size, exactly as they do at the till — an
+ * order the counter could never have *built* off the lattice is one the store will refuse when it
+ * is saved, and refuse at the end, after the correction has already been promised to the customer.
+ * The store recalculates totals and stock the same way it does for any other order edit — this
+ * view model only ever sends what changed.
  */
 class OrderDetailViewModel(
     private val orderId: Long,
@@ -134,20 +154,31 @@ class OrderDetailViewModel(
         }
     }
 
+    /**
+     * Opens the working copy, with each line's pack size read from the local catalog — an order's
+     * line items carry the product's id and price but nothing about how it may be ordered, and the
+     * +/− buttons need that before the first tap. A product this device hasn't got (deleted from
+     * the store, or never synced) keeps the 1/1 default and steps one unit at a time.
+     */
     fun startEditing() {
         val current = _order.value ?: return
-        _workingLines.value = current.lineItems.map { item ->
-            EditableLine(
-                localKey = item.id,
-                itemId = item.id,
-                productId = item.productId,
-                name = item.name,
-                sku = item.sku,
-                unitPrice = item.price,
-                quantity = item.quantity,
-            )
+        viewModelScope.launch {
+            _workingLines.value = current.lineItems.map { item ->
+                val product = productRepository.byId(item.productId)
+                EditableLine(
+                    localKey = item.id,
+                    itemId = item.id,
+                    productId = item.productId,
+                    name = item.name,
+                    sku = item.sku,
+                    unitPrice = item.price,
+                    quantity = item.quantity,
+                    packSize = product?.packSize ?: 1,
+                    quantityStep = product?.quantityStep ?: 1,
+                )
+            }
+            _editing.value = true
         }
-        _editing.value = true
     }
 
     fun cancelEditing() {
@@ -158,13 +189,16 @@ class OrderDetailViewModel(
 
     fun onQueryChange(value: String) { _query.value = value }
 
-    /** Adds a product to the working lines, or bumps its quantity if it's already on the order. */
+    /**
+     * Adds a product to the working lines, or puts another case on it when it's already there —
+     * the same pack size the till would have rung up.
+     */
     fun addProduct(product: Product) {
         _workingLines.value = _workingLines.value.let { current ->
             val index = current.indexOfFirst { it.productId == product.id }
             if (index >= 0) {
                 current.toMutableList().also { lines ->
-                    lines[index] = lines[index].copy(quantity = lines[index].quantity + 1)
+                    lines[index] = lines[index].stepped(+1)
                 }
             } else {
                 current + EditableLine(
@@ -174,7 +208,9 @@ class OrderDetailViewModel(
                     name = product.name,
                     sku = product.sku,
                     unitPrice = product.price,
-                    quantity = product.minOrderQuantity.coerceAtLeast(1),
+                    quantity = product.packSize,
+                    packSize = product.packSize,
+                    quantityStep = product.quantityStep,
                 )
             }
         }
@@ -216,22 +252,23 @@ class OrderDetailViewModel(
     fun decrement(localKey: Long) = changeQuantity(localKey, -1)
 
     /**
-     * Whether a held − may keep running: true while there is more than one left to take off.
+     * Whether a held − may keep running, or has reached the last case before the line would come
+     * off the order.
      *
-     * Dropping the line entirely is what the bin button is for — a hold should stop at one rather
-     * than run a product off the order on its way past.
+     * Dropping the line entirely is what the bin button is for — a hold should stop at one pack
+     * rather than run a product off the order on its way past. Asked through [EditableLine.stepped]
+     * rather than compared against the pack size, so it can't drift from what − actually does.
      */
     fun canStepDown(localKey: Long): Boolean =
-        _workingLines.value.firstOrNull { it.localKey == localKey }?.let { it.quantity > 1 } == true
+        _workingLines.value.firstOrNull { it.localKey == localKey }?.stepped(-1)?.quantity?.let { it > 0 } == true
 
-    private fun changeQuantity(localKey: Long, delta: Int) {
+    /**
+     * Moves a line by [steps] of its own case step, never off it. Falling below one pack takes the
+     * line off the order rather than leaving a quantity the store won't sell.
+     */
+    private fun changeQuantity(localKey: Long, steps: Int) {
         _workingLines.value = _workingLines.value.mapNotNull { line ->
-            if (line.localKey != localKey) {
-                line
-            } else {
-                val next = line.quantity + delta
-                if (next <= 0) null else line.copy(quantity = next)
-            }
+            if (line.localKey != localKey) line else line.stepped(steps).takeIf { it.quantity > 0 }
         }
     }
 
