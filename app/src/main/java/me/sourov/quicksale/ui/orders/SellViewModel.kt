@@ -264,17 +264,32 @@ class SellViewModel(
         .map { OrderOutcome.forGateway(it) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, OrderOutcome.PAID)
 
+    /** The operator's explicit method pick; null falls back to the store's first method. */
     private val _shippingChoice = MutableStateFlow<ShippingOption?>(null)
-    val selectedShipping: StateFlow<ShippingOption?> = _shippingChoice.asStateFlow()
 
-    private val _shippingCost = MutableStateFlow("")
-    val shippingCost: StateFlow<String> = _shippingCost.asStateFlow()
+    /**
+     * The method this order ships by, or null when it isn't being shipped at all.
+     *
+     * There is no "no shipping" entry in the list to pick: the delivery switch is what says the
+     * customer is carrying it away, so shipping follows that switch and the two can't disagree.
+     */
+    val selectedShipping: StateFlow<ShippingOption?> =
+        combine(_shippingChoice, checkout, _deliveryEnabled) { choice, config, delivering ->
+            if (delivering) choice ?: config.shippingOptions.firstOrNull() else null
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** A cost typed over the method's own; null means the method's configured cost still stands. */
+    private val _shippingCostEdit = MutableStateFlow<String?>(null)
+    val shippingCost: StateFlow<String> =
+        combine(_shippingCostEdit, selectedShipping) { typed, option ->
+            typed ?: option?.cost?.toBigDecimalOrNull()?.toPlainString() ?: "0"
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
     private val _couponCode = MutableStateFlow("")
     val couponCode: StateFlow<String> = _couponCode.asStateFlow()
 
     val totals: StateFlow<TotalsPreview> =
-        combine(_lines, _shippingChoice, _shippingCost, checkout) { lines, shipping, cost, config ->
+        combine(_lines, selectedShipping, shippingCost, checkout) { lines, shipping, cost, config ->
             previewTotals(lines, shipping, cost, config)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, TotalsPreview())
 
@@ -308,26 +323,20 @@ class SellViewModel(
 
     private val buyer = combine(_customer, organization, member, _lines, ::Buyer)
 
-    /** How the order leaves — grouped for the same reason [Buyer] is: to keep the combine typed. */
-    private data class Dispatch(val deliveryEnabled: Boolean, val shipping: ShippingOption?)
-
-    private val dispatch = combine(_deliveryEnabled, _shippingChoice, ::Dispatch)
-
     /** Why the order can't be placed yet, or null when it can. */
     val blocker: StateFlow<PlaceBlocker?> = combine(
         buyer,
-        dispatch,
+        _deliveryEnabled,
         missingAddressFields,
         addressFields,
         allowBackorders,
-    ) { who, how, missing, fields, backordersAllowed ->
+    ) { who, deliveryEnabled, missing, fields, backordersAllowed ->
         placeBlocker(
             customer = who.customer,
             organization = who.organization,
             member = who.member,
             lines = who.lines,
-            deliveryEnabled = how.deliveryEnabled,
-            shipping = how.shipping,
+            deliveryEnabled = deliveryEnabled,
             missingFields = missing,
             addressFieldCount = fields.size,
             allowBackorders = backordersAllowed,
@@ -459,14 +468,13 @@ class SellViewModel(
         _addressValues.value = _addressValues.value + (name to value)
     }
 
-    /** Picks a shipping method (or null for no shipping) and pre-fills its configured cost. */
-    fun selectShipping(option: ShippingOption?) {
+    /** Picks a shipping method; anything typed over the last one's cost gives way to this one's. */
+    fun selectShipping(option: ShippingOption) {
         _shippingChoice.value = option
-        _shippingCost.value = option?.cost?.toBigDecimalOrNull()?.toPlainString()
-            ?: if (option != null) "0" else ""
+        _shippingCostEdit.value = null
     }
 
-    fun setShippingCost(value: String) { _shippingCost.value = value }
+    fun setShippingCost(value: String) { _shippingCostEdit.value = value }
 
     fun setCouponCode(value: String) { _couponCode.value = value }
 
@@ -739,7 +747,6 @@ class SellViewModel(
         member: Member?,
         lines: List<CartLine>,
         deliveryEnabled: Boolean,
-        shipping: ShippingOption?,
         missingFields: List<String>,
         addressFieldCount: Int,
         allowBackorders: Boolean,
@@ -774,10 +781,6 @@ class SellViewModel(
         if (!member.canPlaceOrders) {
             return PlaceBlocker("${member.name} isn't allowed to place orders", fatal = true)
         }
-        // WooCommerce decides an order "needs delivery" from its shipping lines, not its products.
-        if (shipping != null && !deliveryEnabled) {
-            return PlaceBlocker("Turn on delivery — this order is being shipped", false)
-        }
         if (deliveryEnabled) {
             // With no synced form there are no fields to fill, so "nothing missing" would be a
             // false pass — the request would carry an empty shipping block for the store to reject.
@@ -797,8 +800,8 @@ class SellViewModel(
      * converted to net first — otherwise the customer would be charged more than web checkout.
      */
     private fun shippingSelection(config: CheckoutConfig): WooCommerceApi.ShippingSelection? {
-        val option = _shippingChoice.value ?: return null
-        val gross = _shippingCost.value.toBigDecimalOrNull() ?: BigDecimal.ZERO
+        val option = selectedShipping.value ?: return null
+        val gross = shippingCost.value.toBigDecimalOrNull() ?: BigDecimal.ZERO
         val rate = config.standardTaxRatePercent
         val net = if (config.taxesEnabled && config.pricesIncludeTax && option.taxable && rate != null) {
             gross.divide(BigDecimal.ONE + BigDecimal(rate.toString()).movePointLeft(2), 2, RoundingMode.HALF_UP)

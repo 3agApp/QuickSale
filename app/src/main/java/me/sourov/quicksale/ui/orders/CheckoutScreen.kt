@@ -258,6 +258,7 @@ fun CheckoutScreen(
                 selectedGateway = selectedGateway,
                 onSelectGateway = viewModel::selectGateway,
                 orderOutcome = orderOutcome,
+                delivering = delivery.enabled,
                 shippingOptions = checkout.shippingOptions,
                 selectedShipping = selectedShipping,
                 onSelectShipping = viewModel::selectShipping,
@@ -404,9 +405,10 @@ private fun CheckoutOptions(
     selectedGateway: PaymentGateway?,
     onSelectGateway: (PaymentGateway) -> Unit,
     orderOutcome: OrderOutcome,
+    delivering: Boolean,
     shippingOptions: List<ShippingOption>,
     selectedShipping: ShippingOption?,
-    onSelectShipping: (ShippingOption?) -> Unit,
+    onSelectShipping: (ShippingOption) -> Unit,
     shippingCost: String,
     onShippingCostChange: (String) -> Unit,
     couponCode: String,
@@ -430,14 +432,14 @@ private fun CheckoutOptions(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = Spacing.sm),
             )
-            if (shippingOptions.isNotEmpty()) {
+            // Only when the order is actually leaving on a van. Not shipping is said with the
+            // delivery switch above, so this list holds the store's methods and nothing else.
+            if (delivering && shippingOptions.isNotEmpty()) {
                 SelectorRow(
                     label = "Shipping method",
-                    value = selectedShipping?.label ?: "None (in person)",
-                    options = listOf("None (in person)") + shippingOptions.map { it.label },
-                    onSelect = { index ->
-                        onSelectShipping(if (index == 0) null else shippingOptions[index - 1])
-                    },
+                    value = selectedShipping?.label ?: "Select…",
+                    options = shippingOptions.map { it.label },
+                    onSelect = { index -> onSelectShipping(shippingOptions[index]) },
                 )
                 AnimatedVisibility(
                     visible = selectedShipping != null,
