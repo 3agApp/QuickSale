@@ -7,13 +7,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * How a quantity moves, on both screens that move one.
+ * How a quantity moves, on both screens that move one — and they move it identically.
  *
- * The two screens agree on +: it adds a case, so a quantity built at the till is one the store
- * will take. They part company on −. The order-edit screen writes to an order the store already
- * holds, and a save off the lattice is refused after the correction has been promised to the
- * customer, so it stays on the case. The till's cart is not posted until "Place order", so − there
- * is one unit and the disagreement is shown rather than prevented.
+ * + adds a case, so the quantity a counter reaches by tapping is one the store sells in. − comes
+ * down a single unit and says so on the line, because a case with a damaged unit in it has to be
+ * recordable. Neither screen refuses an off-pack quantity: the Kontor plugin enforces its rule on
+ * the storefront cart alone, so nothing the app posts is measured against it.
+ *
+ * The two are tested side by side deliberately. They were once different — the editor held − to the
+ * case — and an order the counter can build but not then correct is the failure this file exists to
+ * catch.
  */
 class PackSizeSteppingTest {
 
@@ -55,27 +58,45 @@ class PackSizeSteppingTest {
         assertEquals(null, CartLine(product(min = 2, step = 1), 3).packSizeNote)
     }
 
-    /** The same product, the same buttons, on an order that has already been placed. */
+    /** The same product and the same buttons, on an order that has already been placed. */
     @Test
-    fun an_order_line_moves_by_the_same_case() {
+    fun an_order_line_moves_the_same_way_the_cart_does() {
         val line = editableLine(quantity = 6, packSize = 6, quantityStep = 6)
 
         assertEquals(12, line.stepped(+1).quantity)
-        assertEquals(6, line.copy(quantity = 12).stepped(-1).quantity)
-        assertEquals(0, line.stepped(-1).quantity)
+        assertEquals(5, line.lowered().quantity)
+        assertEquals(11, line.copy(quantity = 12).lowered().quantity)
+        assertEquals(0, line.copy(quantity = 1).lowered().quantity)
+    }
+
+    /** And says the same sentence about it, word for word — the note comes from one function. */
+    @Test
+    fun an_order_line_reads_the_same_note_as_a_cart_line() {
+        val sixes = product(min = 6, step = 6)
+
+        listOf(5, 7, 12).forEach { quantity ->
+            assertEquals(
+                CartLine(sixes, quantity).packSizeNote,
+                editableLine(quantity, packSize = 6, quantityStep = 6).packSizeNote,
+            )
+        }
+        assertEquals(
+            "Store sells 6 or 12, not 7",
+            editableLine(quantity = 7, packSize = 6, quantityStep = 6).packSizeNote,
+        )
     }
 
     /**
-     * A line billed before the store had a pack size at all. − brings it *onto* the lattice rather
-     * than through it — one tap should correct 7 to 6, not take the product off the order.
+     * A line billed before the store had a pack size at all. + is what brings it onto the lattice;
+     * − leaves it where the operator puts it, saying what the store would rather have.
      */
     @Test
-    fun a_line_that_was_never_on_the_lattice_comes_down_onto_it() {
+    fun a_line_that_was_never_on_the_lattice_is_not_forced_onto_it() {
         val line = editableLine(quantity = 7, packSize = 6, quantityStep = 6)
 
-        assertEquals(6, line.stepped(-1).quantity)
+        assertEquals(6, line.lowered().quantity)
         assertEquals(12, line.stepped(+1).quantity)
-        assertTrue(line.stepped(-1).quantity > 0)
+        assertTrue(line.lowered().quantity > 0)
     }
 
     /** A product this device has no catalog row for still steps one unit at a time. */
@@ -84,8 +105,9 @@ class PackSizeSteppingTest {
         val line = editableLine(quantity = 3)
 
         assertEquals(4, line.stepped(+1).quantity)
-        assertEquals(2, line.stepped(-1).quantity)
-        assertEquals(0, line.copy(quantity = 1).stepped(-1).quantity)
+        assertEquals(2, line.lowered().quantity)
+        assertEquals(0, line.copy(quantity = 1).lowered().quantity)
+        assertEquals(null, line.packSizeNote)
     }
 
     /**

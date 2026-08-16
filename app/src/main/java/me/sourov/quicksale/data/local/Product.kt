@@ -152,6 +152,28 @@ fun snapToPackSize(desired: Int, packSize: Int, step: Int): Int {
 }
 
 /**
+ * How [quantity] disagrees with a store selling in [packSize]s of [step], or null when it sits on
+ * the rule.
+ *
+ * Phrased as the quantities the store *will* take rather than as a rule to decode: at a counter
+ * with someone waiting, "6 or 12, not 7" is a decision, while "step 6, minimum 6" is homework.
+ *
+ * Lives here, beside the arithmetic it describes, because both screens that move a quantity show
+ * it — and a cart line and an order line reading differently about the same product is worse than
+ * either wording on its own.
+ */
+fun packSizeNote(quantity: Int, packSize: Int, step: Int): String? {
+    val below = snapToPackSize(quantity, packSize, step)
+    if (below == quantity) return null
+    val sells = if (below == 0) {
+        "${packSize.coerceAtLeast(1)}"
+    } else {
+        "$below or ${below + step.coerceAtLeast(1)}"
+    }
+    return "Store sells $sells, not $quantity"
+}
+
+/**
  * [quantity] moved [steps] cases of [step], landing on a quantity a store selling in [packSize]s
  * will take. 0 means the line has dropped below a single pack and belongs off the order.
  *

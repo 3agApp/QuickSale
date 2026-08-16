@@ -18,6 +18,7 @@ import me.sourov.quicksale.data.local.Member
 import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.ProductRepository
+import me.sourov.quicksale.data.local.packSizeNote
 import me.sourov.quicksale.data.local.stepPackSize
 import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.data.scanner.ScannerHub
@@ -59,6 +60,21 @@ data class EditableLine(
     val lineTotal: BigDecimal
         get() = (unitPrice.toBigDecimalOrNull() ?: BigDecimal.ZERO) * quantity.toBigDecimal()
 
+    /** How this quantity disagrees with the store's pack rule, or null when it sits on it. */
+    val packSizeNote: String?
+        get() = packSizeNote(quantity, packSize, quantityStep)
+
+    /**
+     * This line one unit smaller, whatever its pack size — 0 means it belongs off the order.
+     *
+     * The same rule the till's − follows, and for the same reason: a case with a damaged unit in
+     * it, or a customer who wants five, is an ordinary thing to have to record. Correcting a
+     * placed order is if anything the *more* likely place to need it, since that is where a
+     * short delivery gets put right. [packSizeNote] says the quantity is off the rule; nothing
+     * refuses it, because nothing on the store side does either.
+     */
+    fun lowered(): EditableLine = copy(quantity = quantity - 1)
+
     /**
      * This line moved [steps] of its case step, snapped onto a quantity the store actually sells —
      * the same arithmetic the till uses. A result of 0 means the line has dropped below one pack,
@@ -91,9 +107,13 @@ data class EditableShipping(
  * Editing a placed order is a smaller tool than building one: no address or payment
  * re-negotiation here, just the products, their quantities, and what the delivery costs — the
  * things a counter gets wrong and has to put right while the customer is still standing there.
- * Quantities move in the product's own pack size, exactly as they do at the till — an
- * order the counter could never have *built* off the lattice is one the store will refuse when it
- * is saved, and refuse at the end, after the correction has already been promised to the customer.
+ *
+ * Quantities behave exactly as they do at the till, down to the − that steps one unit and the note
+ * that says so. This screen used to hold + and − both to the case, on the belief that the store
+ * refused a save off the pack size; reading the Kontor plugin settled that it does not — its
+ * quantity rule is enforced on the storefront cart alone, and it exempts order screens on purpose.
+ * There was never a reason for a correction here to be coarser than the sale it corrects.
+ *
  * The store recalculates totals and stock the same way it does for any other order edit — this
  * view model only ever sends what changed.
  */
@@ -336,27 +356,26 @@ class OrderDetailViewModel(
         }
     }
 
-    fun increment(localKey: Long) = changeQuantity(localKey, +1)
-    fun decrement(localKey: Long) = changeQuantity(localKey, -1)
+    /** + adds a case, exactly as it does at the till. */
+    fun increment(localKey: Long) = changeQuantity(localKey) { it.stepped(+1) }
+
+    /** − comes down one unit at a time, on or off the pack size — see [EditableLine.lowered]. */
+    fun decrement(localKey: Long) = changeQuantity(localKey, EditableLine::lowered)
 
     /**
-     * Whether a held − may keep running, or has reached the last case before the line would come
-     * off the order.
-     *
-     * Dropping the line entirely is what the bin button is for — a hold should stop at one pack
-     * rather than run a product off the order on its way past. Asked through [EditableLine.stepped]
-     * rather than compared against the pack size, so it can't drift from what − actually does.
+     * Whether a held − may keep running, or has reached the last unit before the line would come
+     * off the order. Dropping the line entirely is what the bin button is for.
      */
     fun canStepDown(localKey: Long): Boolean =
-        _workingLines.value.firstOrNull { it.localKey == localKey }?.stepped(-1)?.quantity?.let { it > 0 } == true
+        (_workingLines.value.firstOrNull { it.localKey == localKey }?.quantity ?: 0) > 1
 
     /**
-     * Moves a line by [steps] of its own case step, never off it. Falling below one pack takes the
-     * line off the order rather than leaving a quantity the store won't sell.
+     * Applies [move] to one line. A move that lands on 0 takes the product off the order — that is
+     * the only quantity the working copy won't hold.
      */
-    private fun changeQuantity(localKey: Long, steps: Int) {
+    private fun changeQuantity(localKey: Long, move: (EditableLine) -> EditableLine) {
         _workingLines.value = _workingLines.value.mapNotNull { line ->
-            if (line.localKey != localKey) line else line.stepped(steps).takeIf { it.quantity > 0 }
+            if (line.localKey != localKey) line else move(line).takeIf { it.quantity > 0 }
         }
     }
 

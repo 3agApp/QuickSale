@@ -28,6 +28,7 @@ import me.sourov.quicksale.data.local.Organization
 import me.sourov.quicksale.data.local.OrganizationRepository
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.local.ProductRepository
+import me.sourov.quicksale.data.local.packSizeNote
 import me.sourov.quicksale.data.local.stepPackSize
 import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.data.scanner.ScannerHub
@@ -63,23 +64,9 @@ data class CartLine(val product: Product, val quantity: Int) {
     /** Whether − still leaves a line, rather than taking the product off the order. */
     val canStepDown: Boolean get() = quantity > 1
 
-    /**
-     * How this quantity disagrees with the store's pack rule, or null when it sits on it.
-     *
-     * Named as the quantities the store *will* take rather than as a rule to decode: at a counter
-     * with someone waiting, "6 or 12, not 7" is a decision, while "step 6, minimum 6" is homework.
-     */
+    /** How this quantity disagrees with the store's pack rule, or null when it sits on it. */
     val packSizeNote: String?
-        get() {
-            val below = product.snapOrderQuantity(quantity)
-            if (below == quantity) return null
-            val sells = if (below == 0) {
-                "${product.packSize}"
-            } else {
-                "$below or ${below + product.quantityStep}"
-            }
-            return "Store sells $sells, not $quantity"
-        }
+        get() = packSizeNote(quantity, product.packSize, product.quantityStep)
 
     /**
      * This line one unit smaller, whatever the product's pack size — 0 means it belongs off the
