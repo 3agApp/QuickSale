@@ -287,6 +287,20 @@ class WooCommerceApi(settings: StoreSettings) {
         }
     }
 
+    /**
+     * The shipping line on a placed order.
+     *
+     * [total] is what WooCommerce holds, which is the **net** charge — shipping tax sits in its own
+     * field. Anything showing this to an operator on a tax-inclusive store has to gross it back up
+     * first, or the screen quotes a number the customer was never asked for.
+     */
+    data class OrderShippingLine(
+        val id: Long,
+        val methodId: String,
+        val methodTitle: String,
+        val total: String,
+    )
+
     /** A full order: its totals, stamps and every line item on it. */
     data class OrderDetail(
         val id: Long,
@@ -301,6 +315,14 @@ class WooCommerceApi(settings: StoreSettings) {
         val organizationName: String,
         val locationName: String,
         val lineItems: List<OrderLineItem>,
+        /**
+         * The order's shipping method and charge, or null for one that isn't being shipped.
+         *
+         * Only the first line is read. WooCommerce allows several, but nothing this app can build
+         * produces more than one, and an order that somehow has two is one the shop should be
+         * correcting in admin rather than through a till.
+         */
+        val shippingLine: OrderShippingLine? = null,
         val billing: OrderAddress = OrderAddress.EMPTY,
         val shipping: OrderAddress = OrderAddress.EMPTY,
         /** How the order is to be paid, in the store's own words — e.g. "Pay by invoice". */
@@ -309,15 +331,20 @@ class WooCommerceApi(settings: StoreSettings) {
         val customerNote: String = "",
     ) {
         /**
-         * Whether the counter may still add or remove products.
+         * Whether the counter may still change what is on this order.
          *
-         * Once an order leaves `pending`/`processing` it has typically shipped, been paid out, or
-         * been cancelled/refunded — states nothing here should be re-editing after the fact.
+         * `on-hold` is the important one: every order this app places is created there and waits
+         * for the shop to confirm the payment, so leaving it out made an order un-editable from
+         * the moment it was rung up. It is also what WooCommerce's own `WC_Order::is_editable()`
+         * considers editable.
+         *
+         * Beyond these an order has typically shipped, been paid out, or been cancelled or
+         * refunded — states nothing here should be re-editing after the fact.
          */
         val isEditable: Boolean get() = status in EDITABLE_STATUSES
 
         private companion object {
-            val EDITABLE_STATUSES = setOf("pending", "processing")
+            val EDITABLE_STATUSES = setOf("pending", "on-hold", "processing")
         }
     }
 
@@ -360,34 +387,82 @@ class WooCommerceApi(settings: StoreSettings) {
     suspend fun fetchOrder(id: Long): OrderDetail =
         JSONObject(http.get("wc/v3/orders/$id").body).toOrderDetail()
 
+    /** What to do with an order's shipping line. Null is passed to leave it exactly as it is. */
+    sealed interface ShippingChange {
+
+        /**
+         * Put this method and charge on the order, replacing [lineId] when there is one and adding
+         * a line when there isn't. [total] is the **net** amount — see [OrderShippingLine].
+         */
+        data class Set(
+            val lineId: Long?,
+            val methodId: String,
+            val methodTitle: String,
+            val total: String,
+        ) : ShippingChange
+
+        /** Take the shipping line off the order entirely. */
+        data class Remove(val lineId: Long) : ShippingChange
+    }
+
     /**
-     * Adds, changes or removes products on an order still open enough to edit
+     * Adds, changes or removes products and shipping on an order still open enough to edit
      * ([OrderDetail.isEditable]).
      *
      * [lineItems] is a diff, not the full order: an item with an [LineItem.id] and a positive
      * quantity updates that line, one with an id and `quantity = 0` removes it, and one with no id
      * adds a new line — see [LineItem]. Sending only what changed means a line nobody touched is
-     * never re-priced by a round trip through this call.
+     * never re-priced by a round trip through this call, and it is why [shipping] is left null
+     * rather than resent whenever the operator didn't touch it.
      *
      * [LineItem.subtotal]/[LineItem.total] must be sent for quantity changes on an *existing* line:
      * WooCommerce only auto-prices a line item when it's created, so an update that sends quantity
      * alone changes the count but leaves the line — and the order total — at its old price.
      */
-    suspend fun updateOrderLineItems(id: Long, lineItems: List<LineItem>): OrderDetail {
-        val payload = JSONObject().put(
-            "line_items",
-            JSONArray().apply {
-                lineItems.forEach { item ->
-                    put(JSONObject().apply {
-                        item.id?.let { put("id", it) }
-                        put("product_id", item.productId)
-                        put("quantity", item.quantity)
-                        item.subtotal?.let { put("subtotal", it) }
-                        item.total?.let { put("total", it) }
-                    })
-                }
-            },
-        )
+    suspend fun updateOrder(
+        id: Long,
+        lineItems: List<LineItem> = emptyList(),
+        shipping: ShippingChange? = null,
+    ): OrderDetail {
+        val payload = JSONObject()
+        if (lineItems.isNotEmpty()) {
+            payload.put(
+                "line_items",
+                JSONArray().apply {
+                    lineItems.forEach { item ->
+                        put(JSONObject().apply {
+                            item.id?.let { put("id", it) }
+                            put("product_id", item.productId)
+                            put("quantity", item.quantity)
+                            item.subtotal?.let { put("subtotal", it) }
+                            item.total?.let { put("total", it) }
+                        })
+                    }
+                },
+            )
+        }
+        shipping?.let { change ->
+            payload.put(
+                "shipping_lines",
+                JSONArray().put(JSONObject().apply {
+                    when (change) {
+                        is ShippingChange.Set -> {
+                            change.lineId?.let { put("id", it) }
+                            put("method_id", change.methodId)
+                            put("method_title", change.methodTitle)
+                            put("total", change.total)
+                        }
+                        // A null `method_id` is how WooCommerce's REST orders controller is told to
+                        // drop a line: its `item_is_null()` check looks for exactly that, and there
+                        // is no `quantity = 0` equivalent for shipping.
+                        is ShippingChange.Remove -> {
+                            put("id", change.lineId)
+                            put("method_id", JSONObject.NULL)
+                        }
+                    }
+                }),
+            )
+        }
         return JSONObject(http.patch("wc/v3/orders/$id", payload).body).toOrderDetail()
     }
 
@@ -416,6 +491,14 @@ class WooCommerceApi(settings: StoreSettings) {
         organizationName = optString("woap_organization_name").decodeHtmlEntities(),
         locationName = optString("woap_location_name").decodeHtmlEntities(),
         lineItems = optJSONArray("line_items").toOrderLineItems(),
+        shippingLine = optJSONArray("shipping_lines")?.optJSONObject(0)?.let { line ->
+            OrderShippingLine(
+                id = line.optLong("id"),
+                methodId = line.optString("method_id"),
+                methodTitle = line.optString("method_title").decodeHtmlEntities(),
+                total = line.optString("total"),
+            )
+        },
         billing = optJSONObject("billing").toOrderAddress(),
         shipping = optJSONObject("shipping").toOrderAddress(),
         paymentMethodTitle = optString("payment_method_title").decodeHtmlEntities(),

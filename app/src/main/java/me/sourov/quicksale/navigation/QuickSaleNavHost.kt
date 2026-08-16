@@ -383,6 +383,7 @@ fun QuickSaleNavHost(
                     settingsRepository = container.settings,
                     productRepository = container.products,
                     organizationRepository = container.organizations,
+                    checkoutConfigRepository = container.checkoutConfig,
                 ),
             )
             OrderDetailScreen(

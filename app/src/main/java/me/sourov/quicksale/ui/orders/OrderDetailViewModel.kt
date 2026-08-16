@@ -21,7 +21,12 @@ import me.sourov.quicksale.data.local.ProductRepository
 import me.sourov.quicksale.data.local.stepPackSize
 import me.sourov.quicksale.data.remote.WooCommerceApi
 import me.sourov.quicksale.data.scanner.ScannerHub
+import me.sourov.quicksale.data.settings.CheckoutConfig
+import me.sourov.quicksale.data.settings.CheckoutConfigRepository
 import me.sourov.quicksale.data.settings.SettingsRepository
+import me.sourov.quicksale.data.settings.ShippingOption
+import me.sourov.quicksale.data.settings.shippingGross
+import me.sourov.quicksale.data.settings.shippingNet
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -64,13 +69,29 @@ data class EditableLine(
 }
 
 /**
+ * The shipping on an order being edited: which method carries it, and what it charges.
+ *
+ * [cost] is **gross**, as the operator quoted it and as the till's own cost field reads — the order
+ * itself holds net, and [OrderDetailViewModel.startEditing] grosses it up on the way in. [taxable]
+ * is carried because that conversion depends on it and the order's own shipping line doesn't say;
+ * it comes from the matching store method, defaulting to taxable when there is no match.
+ */
+data class EditableShipping(
+    val methodId: String,
+    val methodTitle: String,
+    val cost: String,
+    val taxable: Boolean,
+)
+
+/**
  * One order: its stamps and totals as WooCommerce holds them, plus — for an order still
  * [WooCommerceApi.OrderDetail.isEditable] — a working copy of its line items that can be changed
  * and saved back.
  *
- * Editing a placed order is a smaller tool than building one: no delivery or payment
- * re-negotiation here, just add, remove, and change quantity on whatever WooCommerce already
- * billed. Quantities move in the product's own pack size, exactly as they do at the till — an
+ * Editing a placed order is a smaller tool than building one: no address or payment
+ * re-negotiation here, just the products, their quantities, and what the delivery costs — the
+ * things a counter gets wrong and has to put right while the customer is still standing there.
+ * Quantities move in the product's own pack size, exactly as they do at the till — an
  * order the counter could never have *built* off the lattice is one the store will refuse when it
  * is saved, and refuse at the end, after the correction has already been promised to the customer.
  * The store recalculates totals and stock the same way it does for any other order edit — this
@@ -81,7 +102,12 @@ class OrderDetailViewModel(
     private val settingsRepository: SettingsRepository,
     private val productRepository: ProductRepository,
     organizationRepository: OrganizationRepository,
+    checkoutConfigRepository: CheckoutConfigRepository,
 ) : ViewModel() {
+
+    /** The store's shipping methods and tax rules, as the last sync left them. */
+    val checkout: StateFlow<CheckoutConfig> = checkoutConfigRepository.config
+        .stateIn(viewModelScope, SharingStarted.Eagerly, CheckoutConfig())
 
     private val _order = MutableStateFlow<WooCommerceApi.OrderDetail?>(null)
     val order: StateFlow<WooCommerceApi.OrderDetail?> = _order.asStateFlow()
@@ -109,6 +135,20 @@ class OrderDetailViewModel(
 
     private val _workingLines = MutableStateFlow<List<EditableLine>>(emptyList())
     val workingLines: StateFlow<List<EditableLine>> = _workingLines.asStateFlow()
+
+    private val _workingShipping = MutableStateFlow<EditableShipping?>(null)
+    val workingShipping: StateFlow<EditableShipping?> = _workingShipping.asStateFlow()
+
+    /**
+     * Whether the shipping controls have been touched during this edit.
+     *
+     * The save is a diff, and shipping is the one part of it that cannot be diffed by comparing
+     * values: the order holds net, the screen shows gross, and rounding through that conversion and
+     * back can move an untouched charge by a cent. So an untouched shipping line is never sent at
+     * all, which is both cheaper and the only way to be sure the app never re-prices a delivery
+     * nobody asked it to.
+     */
+    private val _shippingEdited = MutableStateFlow(false)
 
     private val _saving = MutableStateFlow(false)
     val saving: StateFlow<Boolean> = _saving.asStateFlow()
@@ -177,13 +217,61 @@ class OrderDetailViewModel(
                     quantityStep = product?.quantityStep ?: 1,
                 )
             }
+            _workingShipping.value = current.shippingLine?.let { line ->
+                val taxable = matchingOption(line)?.taxable ?: true
+                val net = line.total.toBigDecimalOrNull() ?: BigDecimal.ZERO
+                EditableShipping(
+                    methodId = line.methodId,
+                    methodTitle = line.methodTitle,
+                    cost = checkout.value.shippingGross(net, taxable).toPlainString(),
+                    taxable = taxable,
+                )
+            }
+            _shippingEdited.value = false
             _editing.value = true
         }
+    }
+
+    /**
+     * The store method an order's shipping line came from, when the catalog still knows it.
+     *
+     * Matched on the method id *and* the title, because a store with several zones offers the same
+     * `flat_rate` in each and only the title tells them apart. A line with no match — a zone that
+     * has since been renamed or removed — is kept and shown as it stands rather than dropped.
+     */
+    private fun matchingOption(line: WooCommerceApi.OrderShippingLine): ShippingOption? =
+        checkout.value.shippingOptions.firstOrNull {
+            it.methodId == line.methodId && it.title == line.methodTitle
+        }
+
+    /** Puts a store method on the order, with its configured cost as the starting figure. */
+    fun selectShipping(option: ShippingOption) {
+        _workingShipping.value = EditableShipping(
+            methodId = option.methodId,
+            methodTitle = option.title,
+            cost = option.cost.toBigDecimalOrNull()?.toPlainString() ?: "0",
+            taxable = option.taxable,
+        )
+        _shippingEdited.value = true
+    }
+
+    fun setShippingCost(value: String) {
+        val current = _workingShipping.value ?: return
+        _workingShipping.value = current.copy(cost = value)
+        _shippingEdited.value = true
+    }
+
+    /** Takes shipping off the order — for a delivery the customer decided to collect after all. */
+    fun removeShipping() {
+        _workingShipping.value = null
+        _shippingEdited.value = true
     }
 
     fun cancelEditing() {
         _editing.value = false
         _workingLines.value = emptyList()
+        _workingShipping.value = null
+        _shippingEdited.value = false
         _query.value = ""
     }
 
@@ -326,7 +414,9 @@ class OrderDetailViewModel(
             }
         }
 
-        if (diff.isEmpty()) {
+        val shipping = shippingChange(original)
+
+        if (diff.isEmpty() && shipping == null) {
             cancelEditing()
             return
         }
@@ -336,15 +426,39 @@ class OrderDetailViewModel(
             try {
                 val settings = settingsRepository.settings.first()
                 val api = WooCommerceApi(settings)
-                _order.value = api.updateOrderLineItems(original.id, diff)
+                _order.value = api.updateOrder(original.id, diff, shipping)
                 _editing.value = false
                 _workingLines.value = emptyList()
+                _workingShipping.value = null
+                _shippingEdited.value = false
             } catch (e: Exception) {
                 _error.value = OrderError.from(e)
             } finally {
                 _saving.value = false
             }
         }
+    }
+
+    /**
+     * What to send for shipping, or null to leave the order's own line alone.
+     *
+     * Gated on the operator having touched it at all — see [_shippingEdited]. The gross figure on
+     * screen becomes the net one WooCommerce stores on the way out, by the same conversion the till
+     * uses, so a delivery costs the customer the same whether it was priced at the counter or
+     * corrected afterwards.
+     */
+    private fun shippingChange(original: WooCommerceApi.OrderDetail): WooCommerceApi.ShippingChange? {
+        if (!_shippingEdited.value) return null
+        val existingId = original.shippingLine?.id
+        val edited = _workingShipping.value
+            ?: return existingId?.let { WooCommerceApi.ShippingChange.Remove(it) }
+        val gross = edited.cost.toBigDecimalOrNull() ?: BigDecimal.ZERO
+        return WooCommerceApi.ShippingChange.Set(
+            lineId = existingId,
+            methodId = edited.methodId,
+            methodTitle = edited.methodTitle,
+            total = checkout.value.shippingNet(gross, edited.taxable).toPlainString(),
+        )
     }
 
     fun consumeMessage() { _message.value = null }
@@ -357,6 +471,7 @@ class OrderDetailViewModel(
             settingsRepository: SettingsRepository,
             productRepository: ProductRepository,
             organizationRepository: OrganizationRepository,
+            checkoutConfigRepository: CheckoutConfigRepository,
         ) = viewModelFactory {
             initializer {
                 OrderDetailViewModel(
@@ -364,6 +479,7 @@ class OrderDetailViewModel(
                     settingsRepository = settingsRepository,
                     productRepository = productRepository,
                     organizationRepository = organizationRepository,
+                    checkoutConfigRepository = checkoutConfigRepository,
                 )
             }
         }

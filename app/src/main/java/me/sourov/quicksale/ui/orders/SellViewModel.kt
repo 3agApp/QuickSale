@@ -41,6 +41,7 @@ import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.BackorderRepository
 import me.sourov.quicksale.data.settings.SettingsRepository
 import me.sourov.quicksale.data.settings.ShippingOption
+import me.sourov.quicksale.data.settings.shippingNet
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -818,12 +819,7 @@ class SellViewModel(
     private fun shippingSelection(config: CheckoutConfig): WooCommerceApi.ShippingSelection? {
         val option = selectedShipping.value ?: return null
         val gross = shippingCost.value.toBigDecimalOrNull() ?: BigDecimal.ZERO
-        val rate = config.standardTaxRatePercent
-        val net = if (config.taxesEnabled && config.pricesIncludeTax && option.taxable && rate != null) {
-            gross.divide(BigDecimal.ONE + BigDecimal(rate.toString()).movePointLeft(2), 2, RoundingMode.HALF_UP)
-        } else {
-            gross.setScale(2, RoundingMode.HALF_UP)
-        }
+        val net = config.shippingNet(gross, option.taxable)
         return WooCommerceApi.ShippingSelection(option.methodId, option.title, net.toPlainString())
     }
 

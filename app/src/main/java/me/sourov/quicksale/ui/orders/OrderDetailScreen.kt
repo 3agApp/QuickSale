@@ -42,6 +42,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,6 +59,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.sourov.quicksale.data.local.Member
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.remote.WooCommerceApi
+import me.sourov.quicksale.data.settings.ShippingOption
 import me.sourov.quicksale.ui.components.EmptyState
 import me.sourov.quicksale.ui.components.LoadingState
 import me.sourov.quicksale.ui.components.QuickSaleCard
@@ -83,6 +86,8 @@ fun OrderDetailScreen(
     val loading by viewModel.loading.collectAsStateWithLifecycle()
     val editing by viewModel.editing.collectAsStateWithLifecycle()
     val workingLines by viewModel.workingLines.collectAsStateWithLifecycle()
+    val workingShipping by viewModel.workingShipping.collectAsStateWithLifecycle()
+    val checkout by viewModel.checkout.collectAsStateWithLifecycle()
     val saving by viewModel.saving.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
     val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
@@ -142,7 +147,10 @@ fun OrderDetailScreen(
             if (editing) {
                 EditOrderBar(
                     itemCount = workingLines.sumOf { it.quantity },
-                    total = workingLines.fold(BigDecimal.ZERO) { acc, line -> acc + line.lineTotal },
+                    // Shipping counts: it is editable on this screen now, and a running total that
+                    // sat still while the delivery charge doubled would be worse than no total.
+                    total = workingLines.fold(BigDecimal.ZERO) { acc, line -> acc + line.lineTotal } +
+                        (workingShipping?.cost?.toBigDecimalOrNull() ?: BigDecimal.ZERO),
                     saving = saving,
                     enabled = workingLines.isNotEmpty(),
                     onCancel = viewModel::cancelEditing,
@@ -175,6 +183,11 @@ fun OrderDetailScreen(
                 onDecrement = viewModel::decrement,
                 onRemove = viewModel::remove,
                 canStepDown = viewModel::canStepDown,
+                shipping = workingShipping,
+                shippingOptions = checkout.shippingOptions,
+                onSelectShipping = viewModel::selectShipping,
+                onShippingCostChange = viewModel::setShippingCost,
+                onRemoveShipping = viewModel::removeShipping,
             )
 
             else -> ReadOnlyOrderContent(
@@ -440,6 +453,11 @@ private fun EditableOrderContent(
     onDecrement: (Long) -> Unit,
     onRemove: (Long) -> Unit,
     canStepDown: (Long) -> Boolean,
+    shipping: EditableShipping?,
+    shippingOptions: List<ShippingOption>,
+    onSelectShipping: (ShippingOption) -> Unit,
+    onShippingCostChange: (String) -> Unit,
+    onRemoveShipping: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -497,6 +515,84 @@ private fun EditableOrderContent(
                     )
                     HorizontalDivider()
                 }
+                // Below the products, because it is the thing you correct after them: the delivery
+                // was quoted off a cart that has just changed under it.
+                item(key = "shipping") {
+                    EditableShippingCard(
+                        shipping = shipping,
+                        options = shippingOptions,
+                        onSelect = onSelectShipping,
+                        onCostChange = onShippingCostChange,
+                        onRemove = onRemoveShipping,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The order's delivery charge, while it is being edited.
+ *
+ * The cost is entered the way it is at the till — what the customer pays, tax included where the
+ * store prices that way — and converted on the way back to WooCommerce, which stores it net.
+ *
+ * A store with no synced shipping methods still gets the cost field for whatever is already on the
+ * order: not being able to name a *different* method is no reason to be unable to correct the
+ * charge on this one.
+ */
+@Composable
+private fun EditableShippingCard(
+    shipping: EditableShipping?,
+    options: List<ShippingOption>,
+    onSelect: (ShippingOption) -> Unit,
+    onCostChange: (String) -> Unit,
+    onRemove: () -> Unit,
+) {
+    QuickSaleCard(modifier = Modifier.padding(vertical = Spacing.md)) {
+        Column(Modifier.padding(Spacing.md)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Shipping",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                if (shipping != null) {
+                    TextButton(onClick = onRemove) { Text("Remove") }
+                }
+            }
+
+            if (options.isNotEmpty()) {
+                SelectorRow(
+                    label = "Method",
+                    value = shipping?.methodTitle ?: "None — nothing is being shipped",
+                    options = options.map { it.label },
+                    onSelect = { index -> onSelect(options[index]) },
+                )
+            } else if (shipping == null) {
+                Text(
+                    text = "Sync the store to choose a shipping method.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text(
+                    text = shipping.methodTitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+
+            if (shipping != null) {
+                OutlinedTextField(
+                    value = shipping.cost,
+                    onValueChange = onCostChange,
+                    label = { Text("Shipping cost") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.xs),
+                )
             }
         }
     }
