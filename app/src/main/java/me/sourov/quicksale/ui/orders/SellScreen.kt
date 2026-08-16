@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +51,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -285,22 +288,20 @@ private fun CartLineRow(
                 overflow = TextOverflow.Ellipsis,
             )
             if (line.beyondStock > 0) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Outlined.Inventory2,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                    Spacer(Modifier.width(Spacing.xs))
-                    Text(
-                        text = "${line.beyondStock} more than in stock",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                LineNote(
+                    icon = Icons.Outlined.Inventory2,
+                    text = "${line.beyondStock} more than in stock",
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            }
+            // Stated, not enforced: − may leave a quantity the store sells in cases of, and the
+            // operator is the one who decides whether that is a problem worth undoing.
+            line.packSizeNote?.let { note ->
+                LineNote(
+                    icon = Icons.Outlined.Info,
+                    text = note,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                )
             }
         }
         RepeatingStepperButton(
@@ -321,6 +322,27 @@ private fun CartLineRow(
         RepeatingStepperButton(onStep = onIncrement, contentDescription = "Increase") {
             Icon(Icons.Filled.Add, contentDescription = "Increase")
         }
+    }
+}
+
+/** One line of small print under a cart line: stock shortfalls, pack-size disagreements. */
+@Composable
+private fun LineNote(icon: ImageVector, text: String, tint: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = tint,
+        )
+        Spacer(Modifier.width(Spacing.xs))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

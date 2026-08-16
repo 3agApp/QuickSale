@@ -59,13 +59,38 @@ data class CartLine(val product: Product, val quantity: Int) {
     val beyondStock: Int
         get() = product.availableStock?.let { (quantity - it).coerceAtLeast(0) } ?: 0
 
+    /** Whether − still leaves a line, rather than taking the product off the order. */
+    val canStepDown: Boolean get() = quantity > 1
+
     /**
-     * Whether stepping down again still leaves a line, rather than taking the product off the order.
+     * How this quantity disagrees with the store's pack rule, or null when it sits on it.
      *
-     * Asked through [stepped] rather than comparing against the pack size directly, so it can't
-     * drift from the snapping that actually decides the next quantity.
+     * Named as the quantities the store *will* take rather than as a rule to decode: at a counter
+     * with someone waiting, "6 or 12, not 7" is a decision, while "step 6, minimum 6" is homework.
      */
-    val canStepDown: Boolean get() = stepped(-1).quantity > 0
+    val packSizeNote: String?
+        get() {
+            val below = product.snapOrderQuantity(quantity)
+            if (below == quantity) return null
+            val sells = if (below == 0) {
+                "${product.packSize}"
+            } else {
+                "$below or ${below + product.quantityStep}"
+            }
+            return "Store sells $sells, not $quantity"
+        }
+
+    /**
+     * This line one unit smaller, whatever the product's pack size — 0 means it belongs off the
+     * order.
+     *
+     * − is the one place the lattice is not enforced. A pack rule describes what the *store* will
+     * sell, and the counter regularly has to say something else: a damaged unit pulled out of a
+     * case, a visitor who wants five. Refusing that in the app doesn't make the shortfall go away,
+     * it just moves the argument to the till — so the quantity is allowed and [packSizeNote] says
+     * plainly that it is off the rule.
+     */
+    fun lowered(): CartLine = copy(quantity = quantity - 1)
 
     /**
      * This line moved [steps] of the product's order step, snapped onto a quantity the store
@@ -76,17 +101,15 @@ data class CartLine(val product: Product, val quantity: Int) {
 
     companion object {
         /**
-         * A line read back from the saved cart, measured against the catalog as it stands now.
+         * A line read back from the saved cart, priced against the catalog as it stands now.
          *
-         * The quantity on disk was legal when it was scanned, but the store may have introduced or
-         * raised a pack size while the cart sat there — and an order placed off the lattice is
-         * refused at the very end, after the customer has been told a price. So the stored quantity
-         * is snapped like any other, and a line that no longer reaches a single pack comes back *at*
-         * the pack size rather than disappearing: the operator scanned that product, and a line
-         * they can see and correct beats a line silently missing from the order they place.
+         * The quantity is kept exactly as it was left. It used to be snapped up onto the current
+         * pack size, from back when the till could not produce an off-lattice quantity at all —
+         * now that − can, a cart that came back rounded would be quietly undoing a deliberate
+         * correction. Whatever it is, [packSizeNote] says so on the line.
          */
         fun restored(product: Product, storedQuantity: Int): CartLine =
-            CartLine(product, product.snapOrderQuantity(storedQuantity).takeIf { it > 0 } ?: product.packSize)
+            CartLine(product, storedQuantity.coerceAtLeast(1))
     }
 }
 
@@ -616,10 +639,11 @@ class SellViewModel(
             _message.value = it
             return
         }
-        changeQuantity(productId, +1)
+        changeQuantity(productId) { it.stepped(+1) }
     }
 
-    fun decrement(productId: Long) = changeQuantity(productId, -1)
+    /** − comes down one unit at a time, on or off the pack size — see [CartLine.lowered]. */
+    fun decrement(productId: Long) = changeQuantity(productId, CartLine::lowered)
 
     /**
      * Whether a held − may keep running, read live rather than from the last composition.
@@ -633,12 +657,12 @@ class SellViewModel(
         _lines.value.firstOrNull { it.product.id == productId }?.canStepDown == true
 
     /**
-     * Moves a line by [steps] of the product's own order step, never off it. Dropping below the
-     * product's minimum removes the line rather than leaving a quantity the store won't sell.
+     * Applies [move] to one line. A move that lands on 0 takes the product off the order — that is
+     * the only quantity the cart won't hold.
      */
-    private fun changeQuantity(productId: Long, steps: Int) {
+    private fun changeQuantity(productId: Long, move: (CartLine) -> CartLine) {
         _lines.value = _lines.value.mapNotNull { line ->
-            if (line.product.id != productId) line else line.stepped(steps).takeIf { it.quantity > 0 }
+            if (line.product.id != productId) line else move(line).takeIf { it.quantity > 0 }
         }
     }
 

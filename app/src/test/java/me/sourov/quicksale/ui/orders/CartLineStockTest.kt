@@ -88,12 +88,14 @@ class CartLineStockTest {
     }
 
     @Test
-    fun a_pack_size_product_stops_at_its_pack_rather_than_at_one() {
-        // Sold in sixes: 12 comes down to 6, and 6 is the last quantity that is still an order.
+    fun a_pack_size_product_steps_down_past_its_pack() {
+        // Sold in sixes, but − works in units: a held − runs 6 → 5 → … → 1 and stops there, like
+        // any other product. The pack rule is said on the line, not enforced by the button.
         val sixes = product(stockQuantity = 50).copy(minOrderQuantity = 6, orderQuantityStep = 6)
 
         assertEquals(true, CartLine(sixes, quantity = 12).canStepDown)
-        assertEquals(false, CartLine(sixes, quantity = 6).canStepDown)
+        assertEquals(true, CartLine(sixes, quantity = 6).canStepDown)
+        assertEquals(false, CartLine(sixes, quantity = 1).canStepDown)
     }
 
     private fun product(

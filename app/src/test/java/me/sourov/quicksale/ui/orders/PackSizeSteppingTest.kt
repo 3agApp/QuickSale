@@ -9,21 +9,50 @@ import org.junit.Test
 /**
  * How a quantity moves, on both screens that move one.
  *
- * The till and the order-edit screen have to agree: an order the counter could never have *built*
- * off a product's pack size is one the store refuses when the correction is saved — and it refuses
- * it after the customer has been told what changed.
+ * The two screens agree on +: it adds a case, so a quantity built at the till is one the store
+ * will take. They part company on −. The order-edit screen writes to an order the store already
+ * holds, and a save off the lattice is refused after the correction has been promised to the
+ * customer, so it stays on the case. The till's cart is not posted until "Place order", so − there
+ * is one unit and the disagreement is shown rather than prevented.
  */
 class PackSizeSteppingTest {
 
-    /** Sold in sixes: what the +/− buttons do at the till. */
+    /** Sold in sixes: + at the till adds a case. */
     @Test
-    fun a_cart_line_moves_by_the_case() {
+    fun a_cart_line_moves_up_by_the_case() {
         val sixes = product(min = 6, step = 6)
 
         assertEquals(12, CartLine(sixes, 6).stepped(+1).quantity)
-        assertEquals(6, CartLine(sixes, 12).stepped(-1).quantity)
-        // Below one case there is no line left; the caller drops it.
-        assertEquals(0, CartLine(sixes, 6).stepped(-1).quantity)
+        // Off the lattice, + comes back onto it rather than carrying the odd unit upward.
+        assertEquals(6, CartLine(sixes, 5).stepped(+1).quantity)
+    }
+
+    /**
+     * − at the till, on the other hand, is one unit — the counter has to be able to say "five" for
+     * a case with a damaged unit in it, whatever the store sells in.
+     */
+    @Test
+    fun a_cart_line_comes_down_one_unit_at_a_time() {
+        val sixes = product(min = 6, step = 6)
+
+        assertEquals(11, CartLine(sixes, 12).lowered().quantity)
+        assertEquals(5, CartLine(sixes, 6).lowered().quantity)
+        // Only zero takes the product off the order; the caller drops it there.
+        assertEquals(0, CartLine(sixes, 1).lowered().quantity)
+    }
+
+    /** What the line says about a quantity the store wouldn't sell — it is said, not prevented. */
+    @Test
+    fun an_off_pack_quantity_names_the_ones_the_store_takes() {
+        val sixes = product(min = 6, step = 6)
+
+        assertEquals(null, CartLine(sixes, 12).packSizeNote)
+        assertEquals("Store sells 6 or 12, not 7", CartLine(sixes, 7).packSizeNote)
+        // Short of a single pack there is no lower quantity to name, only the pack itself.
+        assertEquals("Store sells 6, not 5", CartLine(sixes, 5).packSizeNote)
+        // A minimum larger than the step (2/1 exists in the live catalog) reads the same way.
+        assertEquals("Store sells 2, not 1", CartLine(product(min = 2, step = 1), 1).packSizeNote)
+        assertEquals(null, CartLine(product(min = 2, step = 1), 3).packSizeNote)
     }
 
     /** The same product, the same buttons, on an order that has already been placed. */
@@ -59,25 +88,22 @@ class PackSizeSteppingTest {
         assertEquals(0, line.copy(quantity = 1).stepped(-1).quantity)
     }
 
-    /** A cart read back from disk is measured against the pack size the catalog holds *now*. */
+    /**
+     * A cart read back from disk keeps the quantity it was left with, pack rule or not.
+     *
+     * It used to be rounded onto the lattice, from when the till couldn't produce an off-lattice
+     * quantity in the first place. Now that − can, rounding on restore would quietly undo the
+     * correction the operator made before the app was killed.
+     */
     @Test
-    fun a_restored_line_is_snapped_to_the_rule_as_it_stands() {
+    fun a_restored_line_keeps_the_quantity_it_was_left_with() {
         val sixes = product(min = 6, step = 6)
 
         assertEquals(12, CartLine.restored(sixes, 12).quantity)
-        // Stored between two cases: rounded down to the one the store will sell.
-        assertEquals(6, CartLine.restored(sixes, 11).quantity)
-    }
-
-    /**
-     * Stored short of a case — the rule was introduced while the cart sat there. The line comes
-     * back at one pack rather than vanishing: the operator scanned that product, and a quantity
-     * they can see and correct beats a line silently missing from the order they place.
-     */
-    @Test
-    fun a_restored_line_below_one_pack_comes_back_at_the_pack_size() {
-        assertEquals(6, CartLine.restored(product(min = 6, step = 6), 5).quantity)
-        assertEquals(4, CartLine.restored(product(min = 4, step = 3), 1).quantity)
+        assertEquals(11, CartLine.restored(sixes, 11).quantity)
+        // Short of a pack, too — the note on the line is what tells the operator.
+        assertEquals(5, CartLine.restored(sixes, 5).quantity)
+        assertEquals(1, CartLine.restored(product(min = 4, step = 3), 1).quantity)
     }
 
     /** A store's leftover zero is a missing rule, not a pack of none — the first scan rings up 1. */
@@ -89,6 +115,7 @@ class PackSizeSteppingTest {
         assertEquals(1, sloppy.quantityStep)
         assertEquals(2, CartLine(sloppy, 1).stepped(+1).quantity)
         assertFalse(CartLine(sloppy, 1).canStepDown)
+        assertEquals(null, CartLine(sloppy, 1).packSizeNote)
     }
 
     private fun editableLine(quantity: Int, packSize: Int = 1, quantityStep: Int = 1) = EditableLine(
