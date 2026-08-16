@@ -2,51 +2,28 @@ package me.sourov.quicksale.data.settings
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Getting this mapping wrong bills real money the wrong way round: an invoice sale marked paid is
- * one nobody chases, and a card sale left on hold is one the customer is asked to pay twice.
+ * The one rule an order placed at a stand is created under.
+ *
+ * This used to be a mapping from the payment method — bank transfer on hold, cash on delivery
+ * processing, everything else paid. It is now flat, and the flatness is the point: a till marking
+ * an order paid is a till deciding the shop's books, and `processing` is also the status that
+ * releases an order to Kontor. Both consequences follow from these two constants, so they are
+ * pinned here rather than left to be re-derived from a payload.
  */
 class OrderOutcomeTest {
 
-    private fun gateway(id: String) = PaymentGateway(id, "Whatever the store calls it")
-
     @Test
-    fun `bank transfer and cheque wait for the money`() {
-        listOf("bacs", "cheque").forEach { id ->
-            val outcome = OrderOutcome.forGateway(gateway(id))
-            assertEquals("on-hold", outcome.status)
-            assertFalse(outcome.setPaid)
-        }
+    fun `every order is created on hold`() {
+        assertEquals("on-hold", OrderOutcome.STATUS)
     }
 
     @Test
-    fun `cash on delivery ships now and is paid later`() {
-        val outcome = OrderOutcome.forGateway(gateway("cod"))
-        assertEquals("processing", outcome.status)
-        assertFalse(outcome.setPaid)
-    }
-
-    @Test
-    fun `a paid gateway sends no status, so the store picks one`() {
-        val outcome = OrderOutcome.forGateway(gateway("stripe"))
-        assertNull(outcome.status)
-        assertTrue(outcome.setPaid)
-    }
-
-    /** Gateway ids arrive from the store verbatim, and WooCommerce is not consistent about case. */
-    @Test
-    fun `ids are matched regardless of case`() {
-        assertEquals(OrderOutcome.AWAITING_TRANSFER, OrderOutcome.forGateway(gateway("BACS")))
-        assertEquals(OrderOutcome.PAY_ON_DELIVERY, OrderOutcome.forGateway(gateway("COD")))
-    }
-
-    /** No gateway means nothing is going to collect later, so the sale is treated as taken. */
-    @Test
-    fun `no gateway at all counts as paid`() {
-        assertEquals(OrderOutcome.PAID, OrderOutcome.forGateway(null))
+    fun `no order is ever marked paid`() {
+        // `set_paid` would run WooCommerce's own payment_complete(), which moves the order to
+        // processing or completed and stamps a payment date — straight past the hold.
+        assertFalse(OrderOutcome.SET_PAID)
     }
 }

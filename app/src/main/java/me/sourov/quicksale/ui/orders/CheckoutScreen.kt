@@ -84,7 +84,6 @@ fun CheckoutScreen(
     val blocker by viewModel.blocker.collectAsStateWithLifecycle()
     val checkout by viewModel.checkout.collectAsStateWithLifecycle()
     val selectedGateway by viewModel.selectedGateway.collectAsStateWithLifecycle()
-    val orderOutcome by viewModel.orderOutcome.collectAsStateWithLifecycle()
     val selectedShipping by viewModel.selectedShipping.collectAsStateWithLifecycle()
     val shippingCost by viewModel.shippingCost.collectAsStateWithLifecycle()
     val couponCode by viewModel.couponCode.collectAsStateWithLifecycle()
@@ -257,7 +256,6 @@ fun CheckoutScreen(
                 gateways = checkout.gateways,
                 selectedGateway = selectedGateway,
                 onSelectGateway = viewModel::selectGateway,
-                orderOutcome = orderOutcome,
                 delivering = delivery.enabled,
                 shippingOptions = checkout.shippingOptions,
                 selectedShipping = selectedShipping,
@@ -404,7 +402,6 @@ private fun CheckoutOptions(
     gateways: List<PaymentGateway>,
     selectedGateway: PaymentGateway?,
     onSelectGateway: (PaymentGateway) -> Unit,
-    orderOutcome: OrderOutcome,
     delivering: Boolean,
     shippingOptions: List<ShippingOption>,
     selectedShipping: ShippingOption?,
@@ -424,10 +421,10 @@ private fun CheckoutOptions(
                     onSelect = { index -> onSelectGateway(gateways[index]) },
                 )
             }
-            // The payment method is what decides the order's status, so the consequence is stated
-            // where the choice is made — this used to be a standing setting nobody looked at.
+            // Stated right under the payment method precisely because it does *not* follow from it:
+            // someone who has just taken cash needs to see that the order still lands on hold.
             Text(
-                text = orderOutcome.summary,
+                text = OrderOutcome.SUMMARY,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = Spacing.sm),

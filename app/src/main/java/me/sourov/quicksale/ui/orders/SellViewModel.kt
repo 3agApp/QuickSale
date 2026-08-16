@@ -279,14 +279,6 @@ class SellViewModel(
             choice ?: config.gateways.firstOrNull()
         }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    /**
-     * What placing the order now would create. Follows the payment method rather than any setting
-     * of this app's, so the checkout can say what is about to happen before it happens.
-     */
-    val orderOutcome: StateFlow<OrderOutcome> = selectedGateway
-        .map { OrderOutcome.forGateway(it) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, OrderOutcome.PAID)
-
     /** The operator's explicit method pick; null falls back to the store's first method. */
     private val _shippingChoice = MutableStateFlow<ShippingOption?>(null)
 
@@ -689,7 +681,8 @@ class SellViewModel(
                     return@launch
                 }
                 val config = checkout.value
-                // The payment method decides what state the order is created in — see [OrderOutcome].
+                // Recorded on the order, but it decides nothing here: every order is created on
+                // hold and unpaid for the shop to confirm — see [OrderOutcome].
                 val gateway = selectedGateway.value
                 try {
                     val api = WooCommerceApi(settings)
@@ -697,7 +690,6 @@ class SellViewModel(
                         // The member's WordPress user id is what makes this the member's order.
                         customerId = member.userId,
                         lineItems = current.map { WooCommerceApi.LineItem(it.product.id, it.quantity) },
-                        outcome = OrderOutcome.forGateway(gateway),
                         destination = destination(),
                         paymentMethod = gateway,
                         shipping = shippingSelection(config),

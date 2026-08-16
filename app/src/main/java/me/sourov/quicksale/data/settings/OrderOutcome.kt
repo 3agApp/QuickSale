@@ -1,55 +1,30 @@
 package me.sourov.quicksale.data.settings
 
 /**
- * What state an order is created in, decided by the payment method chosen at the till rather than
- * by a setting in this app.
+ * The state every order this app places is created in: on hold, and never marked paid.
  *
- * QuickSale used to apply one status to every order it placed, picked once in Settings. That was a
- * standing guess: the same shop takes card at the stand and invoices its wholesale accounts, and
- * whichever status was chosen was wrong for one of them — an invoice sale marked paid, or a card
- * sale left waiting for money already in the till.
+ * The status used to follow the payment method, mirroring what each core gateway does at web
+ * checkout — bank transfer and cheque on hold, cash on delivery straight to processing, everything
+ * else paid outright. That made the till the thing that decided the shop had been paid, which is
+ * not what a terminal at a fair is for: whoever is holding it knows what was handed over, not
+ * whether it cleared.
  *
- * The gateway is the thing that actually knows, so the app follows it. WooCommerce's REST API never
- * runs a gateway's `process_payment()` — that only happens at web checkout — so the rules the core
- * gateways apply there are mirrored here, matching what the website would have done with the same
- * payment method:
- *
- * - bank transfer and cheque leave the order [AWAITING_TRANSFER] (`on-hold`), unpaid, until the
- *   money arrives;
- * - cash on delivery goes straight to [PAY_ON_DELIVERY] (`processing`), also unpaid, because the
- *   goods move now and the money later;
- * - every other gateway takes payment at the point of sale, so the order is sent as [PAID].
- *
- * [PAID] deliberately names no status. `set_paid` makes WooCommerce run `payment_complete()`
- * itself, which picks `processing` or `completed` from the store's own rules — the
- * `woocommerce_payment_complete_order_status` filter, and whether the order's products need any
- * processing at all. That choice belongs to the store, and this is how it gets to make it.
+ * So the app records the payment method on the order and stops there. Someone at the shop confirms
+ * the money and moves the order on — and that same move is what releases it to the ERP, since
+ * woo-kontor-sync-pro only pushes `processing` and `completed`. Nothing reaches Kontor on the
+ * strength of a tap at a stand.
  */
-enum class OrderOutcome(
-    /** The status slug to request, or null to send none and let the store decide. */
-    val status: String?,
-    /** Drives `set_paid`: true records a payment date and runs the store's paid-status rules. */
-    val setPaid: Boolean,
-    /** What the counter is told will happen, shown beside the payment method at checkout. */
-    val summary: String,
-) {
-    AWAITING_TRANSFER("on-hold", false, "On hold until the payment arrives"),
-    PAY_ON_DELIVERY("processing", false, "Processing, to be paid on delivery"),
-    PAID(null, true, "Paid — the store marks it processing or completed");
+object OrderOutcome {
 
-    companion object {
-        /**
-         * The outcome for [gateway], by the same rules WooCommerce's own gateways use.
-         *
-         * A gateway this doesn't recognise is treated as taking payment now, which is what every
-         * card, wallet and counter-cash gateway does; a store with no gateways configured at all
-         * lands here too, since nothing is going to collect the money later.
-         */
-        fun forGateway(gateway: PaymentGateway?): OrderOutcome =
-            when (gateway?.id?.lowercase()) {
-                "bacs", "cheque" -> AWAITING_TRANSFER
-                "cod" -> PAY_ON_DELIVERY
-                else -> PAID
-            }
-    }
+    /** The status every order is created in, whatever was used to pay for it. */
+    const val STATUS = "on-hold"
+
+    /**
+     * Never true. WooCommerce's `set_paid` runs `payment_complete()`, which stamps a payment date
+     * and moves the order to processing or completed — the two things this rule exists to prevent.
+     */
+    const val SET_PAID = false
+
+    /** What the counter is told will happen, shown beside the payment method at checkout. */
+    const val SUMMARY = "On hold for the shop to confirm, whatever the payment method"
 }
