@@ -21,6 +21,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Remove
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -88,6 +90,8 @@ fun OrderDetailScreen(
     val editing by viewModel.editing.collectAsStateWithLifecycle()
     val workingLines by viewModel.workingLines.collectAsStateWithLifecycle()
     val workingShipping by viewModel.workingShipping.collectAsStateWithLifecycle()
+    val changes by viewModel.changes.collectAsStateWithLifecycle()
+    val reviewing by viewModel.reviewing.collectAsStateWithLifecycle()
     val checkout by viewModel.checkout.collectAsStateWithLifecycle()
     val saving by viewModel.saving.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
@@ -153,9 +157,11 @@ fun OrderDetailScreen(
                     total = workingLines.fold(BigDecimal.ZERO) { acc, line -> acc + line.lineTotal } +
                         (workingShipping?.cost?.toBigDecimalOrNull() ?: BigDecimal.ZERO),
                     saving = saving,
-                    enabled = workingLines.isNotEmpty(),
+                    // Live only when there is something to send. An order still needs a product on
+                    // it, so an edit that removed the last line stays unsaveable.
+                    enabled = changes.isNotEmpty() && workingLines.isNotEmpty(),
                     onCancel = viewModel::cancelEditing,
-                    onSave = viewModel::saveChanges,
+                    onSave = viewModel::requestSave,
                 )
             }
         },
@@ -199,7 +205,97 @@ fun OrderDetailScreen(
         }
     }
 
+    if (reviewing) {
+        ConfirmChangesDialog(
+            changes = changes,
+            saving = saving,
+            onConfirm = viewModel::confirmSave,
+            onDismiss = viewModel::dismissReview,
+        )
+    }
+
     error?.let { OrderErrorDialog(error = it, onDismiss = viewModel::consumeError) }
+}
+
+/**
+ * What saving is about to do, before it does it.
+ *
+ * The one screen in the app that writes to an order someone has already been given a price for, so
+ * it asks. The list is the request itself put into words — see [OrderDetailViewModel.pendingSave] —
+ * rather than a second description of it that could drift.
+ */
+@Composable
+private fun ConfirmChangesDialog(
+    changes: List<OrderChange>,
+    saving: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text("Save these changes?") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                changes.forEach { change -> ChangeRow(change) }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm, enabled = !saving) {
+                if (saving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Text("Save")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !saving) { Text("Keep editing") }
+        },
+    )
+}
+
+/** One line of the confirmation: what happens, to what, and by how much. */
+@Composable
+private fun ChangeRow(change: OrderChange) {
+    val (icon, tint) = when (change.kind) {
+        OrderChange.Kind.ADDED -> Icons.Filled.Add to MaterialTheme.colorScheme.primary
+        OrderChange.Kind.REMOVED -> Icons.Outlined.Delete to MaterialTheme.colorScheme.error
+        OrderChange.Kind.CHANGED ->
+            Icons.AutoMirrored.Filled.ArrowForward to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(verticalAlignment = Alignment.Top) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .size(16.dp),
+            tint = tint,
+        )
+        Spacer(Modifier.width(Spacing.sm))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = change.label,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (change.detail.isNotBlank()) {
+                Text(
+                    text = change.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 /** What the order has on it right now, with no way to change it. */

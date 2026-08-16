@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -35,7 +36,7 @@ import java.math.RoundingMode
  * One line of an order being edited.
  *
  * [itemId] is the WooCommerce line item id when this line already existed on the order, and null
- * for a product added during this edit — that distinction is what [OrderDetailViewModel.saveChanges]
+ * for a product added during this edit — that distinction is what [OrderDetailViewModel.confirmSave]
  * turns into an add/update/remove [WooCommerceApi.LineItem]. [localKey] is a Compose-stable
  * identity for the row that survives quantity edits and doesn't depend on [itemId] being present.
  */
@@ -98,6 +99,127 @@ data class EditableShipping(
     val cost: String,
     val taxable: Boolean,
 )
+
+/** The request an edit would send, paired with the summary that describes it. */
+internal data class PendingSave(
+    val lineItems: List<WooCommerceApi.LineItem>,
+    val shipping: WooCommerceApi.ShippingChange?,
+    val summary: List<OrderChange>,
+)
+
+/**
+ * One thing saving an edit would do, in the words the counter would use to say it out loud.
+ *
+ * [label] names what is affected and [detail] what happens to it, kept apart so the confirmation
+ * can weight the product name over the arithmetic rather than running both together in one string.
+ */
+data class OrderChange(val kind: Kind, val label: String, val detail: String) {
+    enum class Kind { ADDED, REMOVED, CHANGED }
+}
+
+internal fun pendingSave(
+    original: WooCommerceApi.OrderDetail,
+    lines: List<EditableLine>,
+    shipping: EditableShipping?,
+    shippingEdited: Boolean,
+    config: CheckoutConfig,
+): PendingSave {
+    val originalById = original.lineItems.associateBy { it.id }
+    val editedById = lines.filter { it.itemId != null }.associateBy { it.itemId!! }
+
+    val items = mutableListOf<WooCommerceApi.LineItem>()
+    val summary = mutableListOf<OrderChange>()
+
+    originalById.keys.filterNot { it in editedById }.forEach { removedId ->
+        val item = originalById.getValue(removedId)
+        items += WooCommerceApi.LineItem(productId = item.productId, quantity = 0, id = removedId)
+        summary += OrderChange(OrderChange.Kind.REMOVED, item.name, "was ${item.quantity}")
+    }
+    editedById.forEach { (id, line) ->
+        val was = originalById[id] ?: return@forEach
+        if (was.quantity == line.quantity) return@forEach
+        val lineTotal = line.lineTotal.setScale(2, RoundingMode.HALF_UP).toPlainString()
+        items += WooCommerceApi.LineItem(
+            productId = line.productId,
+            quantity = line.quantity,
+            id = id,
+            subtotal = lineTotal,
+            total = lineTotal,
+        )
+        summary += OrderChange(
+            OrderChange.Kind.CHANGED,
+            line.name,
+            "${was.quantity} → ${line.quantity} · ${line.lineTotal.display()}",
+        )
+    }
+    lines.filter { it.itemId == null }.forEach { line ->
+        val lineTotal = line.lineTotal.setScale(2, RoundingMode.HALF_UP).toPlainString()
+        items += WooCommerceApi.LineItem(
+            productId = line.productId,
+            quantity = line.quantity,
+            subtotal = lineTotal,
+            total = lineTotal,
+        )
+        summary += OrderChange(
+            OrderChange.Kind.ADDED,
+            line.name,
+            "${line.quantity} · ${line.lineTotal.display()}",
+        )
+    }
+
+    val shippingChange = shippingChange(original, shipping, shippingEdited, config)
+    when (shippingChange) {
+        null -> Unit
+        is WooCommerceApi.ShippingChange.Remove -> summary += OrderChange(
+            OrderChange.Kind.REMOVED,
+            "Shipping",
+            original.shippingLine?.methodTitle.orEmpty(),
+        )
+        // Stated as what the order will end up with rather than as a before/after: the "before"
+        // is a net figure that would have to be grossed back up to be comparable, and a wrong
+        // number on a confirmation is worse than one fewer number.
+        is WooCommerceApi.ShippingChange.Set -> summary += OrderChange(
+            kind = if (original.shippingLine == null) {
+                OrderChange.Kind.ADDED
+            } else {
+                OrderChange.Kind.CHANGED
+            },
+            label = "Shipping",
+            detail = "${shippingChange.methodTitle} · " +
+                (shipping?.cost?.toBigDecimalOrNull() ?: BigDecimal.ZERO).display(),
+        )
+    }
+
+    return PendingSave(items, shippingChange, summary)
+}
+
+/**
+ * What to send for shipping, or null to leave the order's own line alone.
+ *
+ * Gated on the operator having touched it at all — see [_shippingEdited]. The gross figure on
+ * screen becomes the net one WooCommerce stores on the way out, by the same conversion the till
+ * uses, so a delivery costs the customer the same whether it was priced at the counter or
+ * corrected afterwards.
+ */
+private fun shippingChange(
+    original: WooCommerceApi.OrderDetail,
+    edited: EditableShipping?,
+    shippingEdited: Boolean,
+    config: CheckoutConfig,
+): WooCommerceApi.ShippingChange? {
+    if (!shippingEdited) return null
+    val existingId = original.shippingLine?.id
+    if (edited == null) {
+        return existingId?.let { WooCommerceApi.ShippingChange.Remove(it) }
+    }
+    val gross = edited.cost.toBigDecimalOrNull() ?: BigDecimal.ZERO
+    return WooCommerceApi.ShippingChange.Set(
+        lineId = existingId,
+        methodId = edited.methodId,
+        methodTitle = edited.methodTitle,
+        total = config.shippingNet(gross, edited.taxable).toPlainString(),
+    )
+}
 
 /**
  * One order: its stamps and totals as WooCommerce holds them, plus — for an order still
@@ -169,6 +291,32 @@ class OrderDetailViewModel(
      * nobody asked it to.
      */
     private val _shippingEdited = MutableStateFlow(false)
+
+    /**
+     * Everything this edit would change, or empty when it would change nothing.
+     *
+     * Drives both halves of saving: the button is live only while this has something in it, and the
+     * confirmation lists it. Reaching for the same value for both is what stops a Save that is lit
+     * up with nothing behind it — the old button was enabled whenever the order had any lines at
+     * all, so it invited a round trip to the store to send an empty diff.
+     */
+    val changes: StateFlow<List<OrderChange>> = combine(
+        _editing,
+        _order,
+        _workingLines,
+        _workingShipping,
+        _shippingEdited,
+    ) { editing, order, lines, shipping, shippingEdited ->
+        if (!editing || order == null) {
+            emptyList()
+        } else {
+            pendingSave(order, lines, shipping, shippingEdited, checkout.value).summary
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Whether the confirmation is up, listing [changes] and waiting for a yes. */
+    private val _reviewing = MutableStateFlow(false)
+    val reviewing: StateFlow<Boolean> = _reviewing.asStateFlow()
 
     private val _saving = MutableStateFlow(false)
     val saving: StateFlow<Boolean> = _saving.asStateFlow()
@@ -289,6 +437,7 @@ class OrderDetailViewModel(
 
     fun cancelEditing() {
         _editing.value = false
+        _reviewing.value = false
         _workingLines.value = emptyList()
         _workingShipping.value = null
         _shippingEdited.value = false
@@ -383,59 +532,34 @@ class OrderDetailViewModel(
         _workingLines.value = _workingLines.value.filterNot { it.localKey == localKey }
     }
 
+    /** Opens the confirmation. What it lists is what [confirmSave] will send, and nothing else. */
+    fun requestSave() {
+        if (changes.value.isEmpty()) return
+        _reviewing.value = true
+    }
+
+    fun dismissReview() { _reviewing.value = false }
+
     /**
-     * Saves the working lines as a diff against what the order had when editing started: removed
-     * lines are sent with `quantity = 0`, changed quantities are sent by id, and new lines are sent
-     * without one — see [WooCommerceApi.updateOrderLineItems]. A line nobody touched is never
-     * resent, so the store never re-prices something that didn't change.
+     * Sends the edit the operator has just confirmed.
      *
-     * Quantity changes and new lines both carry an explicit subtotal/total: WooCommerce only
-     * auto-prices a line when it's created, so a quantity-only update to an existing line would
-     * otherwise leave that line — and the order total — at its old price.
+     * Recomputed here rather than carried over from [requestSave]: nothing can change underneath a
+     * modal dialog, so the two agree, and one path that always derives the request from the current
+     * working copy is easier to be sure of than a snapshot passed between two calls.
      */
-    fun saveChanges() {
+    fun confirmSave() {
         if (_saving.value) return
         val original = _order.value ?: return
-        val originalById = original.lineItems.associateBy { it.id }
-        val edited = _workingLines.value
-        val editedById = edited.filter { it.itemId != null }.associateBy { it.itemId!! }
+        val pending = pendingSave(
+            original = original,
+            lines = _workingLines.value,
+            shipping = _workingShipping.value,
+            shippingEdited = _shippingEdited.value,
+            config = checkout.value,
+        )
 
-        val diff = buildList {
-            originalById.keys.filterNot { it in editedById }.forEach { removedId ->
-                val item = originalById.getValue(removedId)
-                add(WooCommerceApi.LineItem(productId = item.productId, quantity = 0, id = removedId))
-            }
-            editedById.forEach { (id, line) ->
-                val was = originalById[id] ?: return@forEach
-                if (was.quantity != line.quantity) {
-                    val lineTotal = line.lineTotal.setScale(2, RoundingMode.HALF_UP).toPlainString()
-                    add(
-                        WooCommerceApi.LineItem(
-                            productId = line.productId,
-                            quantity = line.quantity,
-                            id = id,
-                            subtotal = lineTotal,
-                            total = lineTotal,
-                        ),
-                    )
-                }
-            }
-            edited.filter { it.itemId == null }.forEach { line ->
-                val lineTotal = line.lineTotal.setScale(2, RoundingMode.HALF_UP).toPlainString()
-                add(
-                    WooCommerceApi.LineItem(
-                        productId = line.productId,
-                        quantity = line.quantity,
-                        subtotal = lineTotal,
-                        total = lineTotal,
-                    ),
-                )
-            }
-        }
-
-        val shipping = shippingChange(original)
-
-        if (diff.isEmpty() && shipping == null) {
+        if (pending.lineItems.isEmpty() && pending.shipping == null) {
+            _reviewing.value = false
             cancelEditing()
             return
         }
@@ -445,12 +569,15 @@ class OrderDetailViewModel(
             try {
                 val settings = settingsRepository.settings.first()
                 val api = WooCommerceApi(settings)
-                _order.value = api.updateOrder(original.id, diff, shipping)
+                _order.value = api.updateOrder(original.id, pending.lineItems, pending.shipping)
+                _reviewing.value = false
                 _editing.value = false
                 _workingLines.value = emptyList()
                 _workingShipping.value = null
                 _shippingEdited.value = false
             } catch (e: Exception) {
+                // Closed first, or the failure would be announced behind the sheet that caused it.
+                _reviewing.value = false
                 _error.value = OrderError.from(e)
             } finally {
                 _saving.value = false
@@ -459,26 +586,21 @@ class OrderDetailViewModel(
     }
 
     /**
-     * What to send for shipping, or null to leave the order's own line alone.
+     * The request this edit would send, and the words for it, worked out together.
      *
-     * Gated on the operator having touched it at all — see [_shippingEdited]. The gross figure on
-     * screen becomes the net one WooCommerce stores on the way out, by the same conversion the till
-     * uses, so a delivery costs the customer the same whether it was priced at the counter or
-     * corrected afterwards.
+     * Deliberately one function rather than two. A confirmation screen derived separately from the
+     * request it confirms is a screen that can lie — and this one is asking someone to approve a
+     * change to an order a customer is standing over.
+     *
+     * The line items are a diff against what the order had when editing started: removed lines are
+     * sent with `quantity = 0`, changed quantities by id, and new lines without one — see
+     * [WooCommerceApi.updateOrder]. A line nobody touched is never resent, so the store never
+     * re-prices something that didn't change.
+     *
+     * Quantity changes and new lines both carry an explicit subtotal/total: WooCommerce only
+     * auto-prices a line when it's created, so a quantity-only update to an existing line would
+     * otherwise leave that line — and the order total — at its old price.
      */
-    private fun shippingChange(original: WooCommerceApi.OrderDetail): WooCommerceApi.ShippingChange? {
-        if (!_shippingEdited.value) return null
-        val existingId = original.shippingLine?.id
-        val edited = _workingShipping.value
-            ?: return existingId?.let { WooCommerceApi.ShippingChange.Remove(it) }
-        val gross = edited.cost.toBigDecimalOrNull() ?: BigDecimal.ZERO
-        return WooCommerceApi.ShippingChange.Set(
-            lineId = existingId,
-            methodId = edited.methodId,
-            methodTitle = edited.methodTitle,
-            total = checkout.value.shippingNet(gross, edited.taxable).toPlainString(),
-        )
-    }
 
     fun consumeMessage() { _message.value = null }
 
