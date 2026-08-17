@@ -48,7 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.sourov.quicksale.data.local.Member
 import me.sourov.quicksale.data.local.Organization
-import me.sourov.quicksale.data.settings.OrderOutcome
+import me.sourov.quicksale.data.settings.NewOrderStatus
 import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.ShippingOption
 import me.sourov.quicksale.ui.components.Monogram
@@ -87,6 +87,7 @@ fun CheckoutScreen(
     val selectedShipping by viewModel.selectedShipping.collectAsStateWithLifecycle()
     val shippingCost by viewModel.shippingCost.collectAsStateWithLifecycle()
     val couponCode by viewModel.couponCode.collectAsStateWithLifecycle()
+    val newOrderStatus by viewModel.newOrderStatus.collectAsStateWithLifecycle()
     val locations by viewModel.locations.collectAsStateWithLifecycle()
     val delivery by viewModel.delivery.collectAsStateWithLifecycle()
     val addressForms by viewModel.addressForms.collectAsStateWithLifecycle()
@@ -264,6 +265,7 @@ fun CheckoutScreen(
                 onShippingCostChange = viewModel::setShippingCost,
                 couponCode = couponCode,
                 onCouponChange = viewModel::setCouponCode,
+                newOrderStatus = newOrderStatus,
             )
 
             Spacer(Modifier.height(Spacing.xl))
@@ -410,6 +412,7 @@ private fun CheckoutOptions(
     onShippingCostChange: (String) -> Unit,
     couponCode: String,
     onCouponChange: (String) -> Unit,
+    newOrderStatus: NewOrderStatus,
 ) {
     QuickSaleCard {
         Column(modifier = Modifier.padding(Spacing.md)) {
@@ -421,10 +424,11 @@ private fun CheckoutOptions(
                     onSelect = { index -> onSelectGateway(gateways[index]) },
                 )
             }
-            // Stated right under the payment method precisely because it does *not* follow from it:
-            // someone who has just taken cash needs to see that the order still lands on hold.
+            // Stated right under the payment method precisely because it does *not* follow from
+            // it: someone who has just taken cash needs to see where the order actually lands, and
+            // that is a setting they may not have been the one to choose.
             Text(
-                text = OrderOutcome.SUMMARY,
+                text = newOrderStatus.checkoutSummary,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = Spacing.sm),

@@ -115,6 +115,7 @@ private fun QuickSaleShell(mode: DeviceMode) {
             checkoutConfigRepository = container.checkoutConfig,
             addressFormRepository = container.addressForms,
             backorderRepository = container.backorders,
+            newOrderStatusRepository = container.newOrderStatus,
         ),
     )
 

@@ -52,6 +52,8 @@ fun SettingsSectionScreen(
 
             SettingsSection.KONTOR -> KontorSettingsSection()
 
+            SettingsSection.ORDERS -> OrderStatusSection()
+
             SettingsSection.STOCK -> StockSettingsSection()
 
             SettingsSection.LABELS -> LabelSettingsSection(

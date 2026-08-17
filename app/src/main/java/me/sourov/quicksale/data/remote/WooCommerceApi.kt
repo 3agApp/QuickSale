@@ -3,6 +3,7 @@ package me.sourov.quicksale.data.remote
 import me.sourov.quicksale.data.local.Product
 import me.sourov.quicksale.data.settings.CheckoutConfig
 import me.sourov.quicksale.data.settings.CurrencyPosition
+import me.sourov.quicksale.data.settings.NewOrderStatus
 import me.sourov.quicksale.data.settings.OrderOutcome
 import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.ShippingOption
@@ -144,8 +145,10 @@ class WooCommerceApi(settings: StoreSettings) {
      * No billing block is sent: the store writes the organization's own billing address over
      * anything posted, so sending one changes nothing.
      *
-     * Every order is created on hold and unpaid, whatever [paymentMethod] says — see [OrderOutcome].
+     * The order is created in [status] and never marked paid, whatever [paymentMethod] says — see
+     * [NewOrderStatus] and [OrderOutcome].
      *
+     * @param status the till's configured status for a new order.
      * @param couponCode optional coupon the store validates and applies server-side.
      * @throws WooApiException with `woap_rest_cannot_purchase`, `woap_rest_shipping_destination`
      *   or `woap_rest_shipping_address` when the store refuses. No order exists after a refusal.
@@ -154,6 +157,7 @@ class WooCommerceApi(settings: StoreSettings) {
         customerId: Long,
         lineItems: List<LineItem>,
         destination: Destination,
+        status: NewOrderStatus,
         paymentMethod: PaymentGateway? = null,
         shipping: ShippingSelection? = null,
         couponCode: String? = null,
@@ -161,8 +165,9 @@ class WooCommerceApi(settings: StoreSettings) {
         val payload = JSONObject().apply {
             put("customer_id", customerId)
             // Both sent on every order, unconditionally. `set_paid` is the one that matters: left
-            // to WooCommerce it would run `payment_complete()` and carry the order past the hold.
-            put("status", OrderOutcome.STATUS)
+            // to WooCommerce it would run `payment_complete()` and carry the order past whichever
+            // status was asked for.
+            put("status", status.slug)
             put("set_paid", OrderOutcome.SET_PAID)
             paymentMethod?.let {
                 put("payment_method", it.id)
@@ -333,10 +338,11 @@ class WooCommerceApi(settings: StoreSettings) {
         /**
          * Whether the counter may still change what is on this order.
          *
-         * `on-hold` is the important one: every order this app places is created there and waits
-         * for the shop to confirm the payment, so leaving it out made an order un-editable from
-         * the moment it was rung up. It is also what WooCommerce's own `WC_Order::is_editable()`
-         * considers editable.
+         * `on-hold` and `processing` are the ones that matter: every order this app places is
+         * created in one of them (see [NewOrderStatus]), so leaving either out would make an order
+         * un-editable from the moment it was rung up. This is a wider set than WooCommerce's own
+         * `WC_Order::is_editable()`, which is a rule about its admin screens — the REST route these
+         * edits go through takes a corrected line item on a processing order.
          *
          * Beyond these an order has typically shipped, been paid out, or been cancelled or
          * refunded — states nothing here should be re-editing after the fact.

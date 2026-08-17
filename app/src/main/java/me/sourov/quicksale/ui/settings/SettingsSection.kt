@@ -1,6 +1,7 @@
 package me.sourov.quicksale.ui.settings
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Language
@@ -53,6 +54,11 @@ enum class SettingsSection(
         title = "Kontor sync",
         subtitle = "Refresh the website's products and stock from Kontor",
         icon = Icons.Outlined.CloudSync,
+    ),
+    ORDERS(
+        title = "Orders",
+        subtitle = "The status an order gets when this device places it",
+        icon = Icons.AutoMirrored.Outlined.ReceiptLong,
     ),
     STOCK(
         title = "Stock",

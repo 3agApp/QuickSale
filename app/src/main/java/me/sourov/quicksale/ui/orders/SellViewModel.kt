@@ -37,7 +37,8 @@ import me.sourov.quicksale.data.settings.AddressFormRepository
 import me.sourov.quicksale.data.settings.AddressForms
 import me.sourov.quicksale.data.settings.CheckoutConfig
 import me.sourov.quicksale.data.settings.CheckoutConfigRepository
-import me.sourov.quicksale.data.settings.OrderOutcome
+import me.sourov.quicksale.data.settings.NewOrderStatus
+import me.sourov.quicksale.data.settings.NewOrderStatusRepository
 import me.sourov.quicksale.data.settings.PaymentGateway
 import me.sourov.quicksale.data.settings.BackorderRepository
 import me.sourov.quicksale.data.settings.SettingsRepository
@@ -175,7 +176,16 @@ class SellViewModel(
     checkoutConfigRepository: CheckoutConfigRepository,
     addressFormRepository: AddressFormRepository,
     backorderRepository: BackorderRepository,
+    private val newOrderStatusRepository: NewOrderStatusRepository,
 ) : ViewModel() {
+
+    /**
+     * The status the next order will be created in, for the line the checkout shows under the
+     * payment method. What is actually sent is read from disk at [placeOrder], so an order can't
+     * go out on a value this happens not to be collecting.
+     */
+    val newOrderStatus: StateFlow<NewOrderStatus> = newOrderStatusRepository.status
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NewOrderStatus.DEFAULT)
 
     /**
      * Whether selling past the shop's count is permitted. Read as state rather than awaited per
@@ -669,9 +679,11 @@ class SellViewModel(
                     return@launch
                 }
                 val config = checkout.value
-                // Recorded on the order, but it decides nothing here: every order is created on
-                // hold and unpaid for the shop to confirm — see [OrderOutcome].
+                // Recorded on the order, but it decides nothing here: the status comes from the
+                // till's setting and no order is ever marked paid — see [NewOrderStatus] and
+                // [OrderOutcome].
                 val gateway = selectedGateway.value
+                val status = newOrderStatusRepository.status.first()
                 try {
                     val api = WooCommerceApi(settings)
                     val order = api.createOrder(
@@ -679,6 +691,7 @@ class SellViewModel(
                         customerId = member.userId,
                         lineItems = current.map { WooCommerceApi.LineItem(it.product.id, it.quantity) },
                         destination = destination(),
+                        status = status,
                         paymentMethod = gateway,
                         shipping = shippingSelection(config),
                         couponCode = _couponCode.value,
@@ -875,6 +888,7 @@ class SellViewModel(
             checkoutConfigRepository: CheckoutConfigRepository,
             addressFormRepository: AddressFormRepository,
             backorderRepository: BackorderRepository,
+            newOrderStatusRepository: NewOrderStatusRepository,
         ) = viewModelFactory {
             initializer {
                 SellViewModel(
@@ -885,6 +899,7 @@ class SellViewModel(
                     checkoutConfigRepository = checkoutConfigRepository,
                     addressFormRepository = addressFormRepository,
                     backorderRepository = backorderRepository,
+                    newOrderStatusRepository = newOrderStatusRepository,
                 )
             }
         }
